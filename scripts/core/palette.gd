@@ -19,8 +19,8 @@ const SAND := Color(0.80, 0.72, 0.52)
 const FLOWER_COLORS := [Color(0.95, 0.85, 0.30), Color(0.92, 0.45, 0.62), Color(0.62, 0.52, 0.95), Color(0.98, 0.98, 0.92), Color(0.95, 0.55, 0.25)]
 
 # Characters
-const GOBLIN_SKIN := Color(0.42, 0.68, 0.30)
-const HOBGOBLIN_SKIN := Color(0.33, 0.52, 0.30)
+const GOBLIN_SKIN := Color(0.47, 0.55, 0.22)      # olive green (concept: docs/concepts/goblin-player-v1.png)
+const HOBGOBLIN_SKIN := Color(0.38, 0.46, 0.20)   # deeper olive, still clearly goblin
 const CLOTH_BROWN := Color(0.46, 0.32, 0.20)
 const CLOTH_RED := Color(0.62, 0.20, 0.16)
 const CLOTH_BLUE := Color(0.24, 0.36, 0.62)

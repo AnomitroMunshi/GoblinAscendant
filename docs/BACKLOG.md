@@ -44,6 +44,13 @@ World, Combat and UI agents are paused by user request; their partial files stay
 
 ## Progress log
 ### 2026-10-30
+- Goblin model rebuilt to match `docs/concepts/goblin-player-v1.png`. It now has:
+  - faceted low-poly look, olive skin, huge swept ears with brown-pink inner ears;
+  - amber eyes with dark rings and highlights, furrowed brows, a triangular nose, a smirk with two lower fangs;
+  - sleeveless brown vest with a split tunic skirt, diagonal strap and square steel buckles;
+  - leather bracers, chunky cuffed boots and a faceted steel short sword with a wrapped grip.
+
+  The concept has no satchel, so it was dropped. The Hobgoblin keeps the same design, bigger and with armour. The joint, animation and expression API is unchanged: player tests 42/42. Renders are in `tests/screens/goblin_*.png` via `tests/goblin_turnaround.tscn`.
 - Player-only build verified: headless run clean; windowed smoke test (`tests/playground_screens.tscn`) spawns, runs, jumps and heavy-attacks with no errors. Committed.
 - User asked for a player-only build with basic movement. Paused World, Combat and UI agents. Added the movement playground and a `PLAYER_ONLY` switch in main; Esc releases the mouse and a click recaptures it (no UI yet).
 - Player & Camera agent finished: full controller, camera with collision, lock-on, goblin model with expressions, evolution visuals; 42/42 tests. Enabled physics interpolation.
