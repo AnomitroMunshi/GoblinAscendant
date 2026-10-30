@@ -77,7 +77,9 @@ func is_dead() -> bool
 Lockable/targetable actors also implement `get_lock_point() -> Vector3` (chest height) and expose
 `var display_name: String`, and a `HealthComponent` as `health`.
 Attacks use `Hitbox` (`scripts/combat/hitbox.gd`) with **explicit active windows**: one hit per target
-per activation (multi-hit only via `rehit_interval`). Heavy hits (`info.is_heavy`) call
+per activation (multi-hit only via `rehit_interval`). Hitboxes check line of sight on `WORLD`
+by default (`require_line_of_sight`, chest height `los_height`), so nothing hits through walls;
+size hitboxes to the real weapon reach. Heavy hits (`info.is_heavy`) call
 `GameFeel.hit_stop(0.06)` + `GameFeel.shake(...)` on the attacker side when they connect.
 Emit `Events.actor_damaged(actor, info)` when an actor is hurt.
 
@@ -87,6 +89,19 @@ Race never decides hostility. Enemies attack only targets where `Factions.is_hos
 Neutral adventurers never attack the player unprovoked. If the player damages one, **that individual**
 gets a grudge (`has_grudge(node) -> bool`) and defends itself; it calms down after the player leaves
 (~20 s out of range). Emit `Events.actor_provoked(actor, by)` when provoked.
+Adventurers are hostile to wolves, goblin raiders, human raiders and the ogre, so they fight
+monsters nearby. Detection radius and leash keep those fights local. Allies assist only within
+a limited radius (~12 m). Grudges are per individual, so one encounter never makes a whole
+faction or race hostile. Nib (`goblin_friend`) is separate from `goblin_raider`, and adventurers
+are separate from `human_raider`.
+
+Fair combat: at most 2 simultaneous melee attackers on the player (attack tokens), with the
+others repositioning. No detection or attacks through walls (LOS). Attacks only start in real
+range. Pursuit limits, reliable return home, anti-stuck recovery, and the boss resets to full HP.
+Fighting styles: wolves circle then lunge; the alpha howls to alert nearby wolves; goblin raiders
+strike quickly and retreat when wounded; human raiders are deliberate and sometimes block; the
+captain has a telegraphed heavy attack; the ogre uses slow swings and a ground slam with
+generous warning and recovery.
 
 ## Enemy AI (Combat agent)
 Reusable state machine: `IDLE → PATROL → INVESTIGATE → CHASE → ATTACK → RECOVER`, plus `HURT`,
@@ -125,6 +140,11 @@ func play_cast_animation() -> void
 func is_busy() -> bool                     # attacking/dodging/hurt/dead → abilities refuse
 func respawn() -> void                     # at GameState.get_respawn_position()
 ```
+- Extras: `get_facing_yaw()`, `is_sprinting()`, `is_blocking()`, `is_invulnerable()`,
+  `get_state_name()`, `get_move_direction()`, `max_stamina`/`max_energy`, `camera_rig`, `model`
+  (`PlayerGoblinModel.set_stage(stage, animate := true)`), `abilities`.
+- Physics interpolation is ON project-wide: anything that teleports a body/visual must call
+  `reset_physics_interpolation()` after moving it (spawn, respawn, home return).
 - Spawns at `GameState.get_spawn_position()`; sets `GameState.player = self`; emits `Events.player_spawned`.
 - Stats come from `Progression.max_health()/max_stamina()/max_energy()/attack_power()`; refresh on
   `Events.stats_upgraded`, `level_up`, `evolution_changed`.
@@ -174,14 +194,43 @@ UI calls `GameState.set_menu_open(true/false)` (handles mouse capture). Pause us
 `get_tree().paused`; UI nodes use `PROCESS_MODE_ALWAYS`. Title screen shown when
 `GameState.show_title` (first boot) with **Continue** (if `SaveManager.has_save()`) and **New Game**.
 
+## Platforms: PC now, mobile later (architecture only)
+**Chapter 1 targets PC only.** Nothing mobile-specific is built now: no touch overlay, touch
+settings or mobile tuning. The hooks below only keep the architecture ready for a later mobile
+pass, and on a PC they are inactive.
+- **PC (default):** keyboard + mouse. The camera uses the captured mouse; attacks are on LMB/RMB
+  and target switching is on the wheel. A controller also works. No touch overlay.
+- **Mobile (LATER — not built yet):** `Settings.use_touch_controls()` is true (auto on Android/iOS; the
+  auto-detect never enables it on a PC, even a touchscreen laptop; override with setting
+  `touch_controls` 0 auto / 1 on / 2 off).
+  - A future on-screen controls layer will press the **same InputMap actions** via
+    `Input.parse_input_event(InputEventAction)`. Camera look comes from `Events.look_input(deg)`.
+  - Mouse-button bindings are removed from gameplay actions while touch is active
+    (`InputSetup.apply_touch_profile`), and the pointer is never captured.
+  - `Events.app_suspended` (app backgrounded / Android back) autosaves and opens pause.
+- Rule for every agent: gameplay reads **only actions**, never raw keys or mouse buttons.
+  Mobile defaults: quality 0, view_distance 0.7, render_scale 0.8, ui_scale 1.2, lock_on_assist.
+  Quality 0 must be mobile-friendly: no SSAO, volumetrics, or screen/depth-texture reads, few
+  draw calls, reduced foliage and particles. The Mobile renderer is configured in `project.godot`.
+
 ## Settings
 `Settings` keys: `mouse_sensitivity` (deg/pixel), `invert_y`, `camera_distance`, `fov`,
 `camera_shake`, `graphics_quality` (0/1/2), `view_distance`, `render_scale`, `vsync`,
 `fullscreen`, `show_fps`, `master_volume`, `music_volume`, `sfx_volume`, `ambience_volume`.
+(Reserved for the later mobile pass, not shown in the PC settings UI: `touch_controls`,
+`touch_look_sensitivity`, `ui_scale`, `lock_on_assist`.)
 World applies quality/view-distance (shadows, SSAO, glow, fog, foliage density, visibility ranges);
 Audio applies volumes; camera applies its keys; `Settings` applies display keys.
 
 ## Art direction (all agents)
+Fully 3D, third-person, stylized fantasy environments with **anime-inspired characters and combat**.
+Lush forests, colourful meadows, beautiful water, ancient ruins, warm sunlight, atmospheric distant
+mountains. Characters: expressive faces, readable silhouettes, stylized proportions; the goblin stays
+visibly goblin-like through every evolution. Cohesive materials, **soft gradients, restrained outlines**.
+Combat: strong poses, clear anticipation, impactful follow-through, controlled colourful effects.
+One consistent, achievable style across player, enemies and environment — never mix realistic asset
+packs with cartoon characters. Simple stylized materials + lighting first; complex cel shading only
+after core visuals and gameplay work.
 Stylized, cohesive, warm: emerald meadows, layered canopies, wildflowers, warm sun, soft shadows,
 atmospheric depth/fog. Use `Palette` colours/materials (`Palette.mat`, `Palette.glow`,
 `Palette.vertex_color_mat`). Characters are articulated primitive models (capsules, spheres,

@@ -112,8 +112,29 @@ func in_combat() -> bool:
 ## is_input_blocked(). Mouse is captured only while no menu is open.
 func set_menu_open(open: bool) -> void:
 	menu_open = open
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if open else Input.MOUSE_MODE_CAPTURED
+	# Touch devices never capture the pointer; on desktop it is captured during play.
+	var capture := not open and not Settings.use_touch_controls()
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if capture else Input.MOUSE_MODE_VISIBLE
 	menu_state_changed.emit(open)
+
+
+## Mobile: backgrounding the app autosaves and asks the UI to pause.
+## Desktop: losing window focus only releases the mouse (handled by the OS).
+func _notification(what: int) -> void:
+	match what:
+		NOTIFICATION_APPLICATION_PAUSED, NOTIFICATION_WM_GO_BACK_REQUEST:
+			_suspend()
+		NOTIFICATION_APPLICATION_FOCUS_OUT:
+			if Settings.is_mobile():
+				_suspend()
+
+
+func _suspend() -> void:
+	if show_title or not is_instance_valid(player):
+		return
+	if not is_player_dead() and not boss_active:
+		SaveManager.save_game()
+	Events.app_suspended.emit()
 
 
 func is_input_blocked() -> bool:

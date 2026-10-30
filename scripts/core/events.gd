@@ -59,4 +59,12 @@ signal chapter_completed
 # --- Feel ---
 signal camera_shake(strength: float)
 
+# --- Device-agnostic input ---
+## Camera look delta from non-mouse sources (touch drag on mobile), already in
+## degrees (yaw, pitch); positive x turns right, positive y looks down.
+## The camera adds it directly, honouring invert_y.
+signal look_input(delta_degrees: Vector2)
+## The app lost focus / was backgrounded (mobile) — UI opens the pause menu.
+signal app_suspended
+
 @warning_ignore_restore("unused_signal")

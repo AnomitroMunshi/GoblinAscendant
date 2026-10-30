@@ -60,6 +60,30 @@ static func bindings() -> Dictionary:
 	}
 
 
+## Actions whose mouse-button bindings must be disabled on touch screens:
+## touch taps are emulated as left clicks and would otherwise fire attacks.
+const MOUSE_GAMEPLAY_ACTIONS: Array[StringName] = [
+	&"attack_light", &"attack_heavy", &"target_next", &"target_prev", &"camera_reset",
+]
+
+
+## Touch profile: on-screen controls trigger actions via Input.parse_input_event
+## (InputEventAction) and camera look arrives through Events.look_input, so all
+## gameplay code stays input-device agnostic. Mouse-button bindings are removed
+## while touch is active and restored when it is turned off.
+static func apply_touch_profile(touch_enabled: bool) -> void:
+	ensure_actions()
+	var defaults := bindings()
+	for action: StringName in MOUSE_GAMEPLAY_ACTIONS:
+		for ev: InputEvent in InputMap.action_get_events(action):
+			if ev is InputEventMouseButton:
+				InputMap.action_erase_event(action, ev)
+		if not touch_enabled:
+			for ev: InputEvent in defaults[action]:
+				if ev is InputEventMouseButton:
+					InputMap.action_add_event(action, ev)
+
+
 static func ensure_actions() -> void:
 	var map := bindings()
 	for action: StringName in map:

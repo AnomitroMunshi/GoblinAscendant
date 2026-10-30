@@ -25,6 +25,19 @@ const DEFAULTS := {
 	&"music_volume": 0.55,
 	&"sfx_volume": 0.8,
 	&"ambience_volume": 0.7,
+	&"touch_controls": 0,         # 0 auto-detect, 1 always on, 2 off
+	&"touch_look_sensitivity": 0.18,  # degrees per pixel of touch drag
+	&"ui_scale": 1.0,             # 0.8..1.4; larger on phones
+	&"lock_on_assist": false,     # auto-acquire a lock target when attacking (mobile-friendly)
+}
+
+## Platform-dependent defaults applied before the user's saved values.
+const MOBILE_DEFAULTS := {
+	&"graphics_quality": 0,
+	&"view_distance": 0.7,
+	&"render_scale": 0.8,
+	&"ui_scale": 1.2,
+	&"lock_on_assist": true,
 }
 
 var values: Dictionary = DEFAULTS.duplicate()
@@ -32,8 +45,25 @@ var values: Dictionary = DEFAULTS.duplicate()
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	if is_mobile():
+		for key: StringName in MOBILE_DEFAULTS:
+			values[key] = MOBILE_DEFAULTS[key]
 	load_settings()
 	apply_display()
+	InputSetup.apply_touch_profile(use_touch_controls())
+
+
+## True on Android/iOS builds (and the web on touch devices).
+func is_mobile() -> bool:
+	return OS.has_feature("mobile") or OS.has_feature("web_android") or OS.has_feature("web_ios")
+
+
+## Whether the on-screen touch controls should be shown and touch input used.
+func use_touch_controls() -> bool:
+	match int(get_value(&"touch_controls", 0)):
+		1: return true
+		2: return false
+	return is_mobile() or (DisplayServer.is_touchscreen_available() and not OS.has_feature("pc"))
 
 
 func get_value(key: StringName, fallback: Variant = null) -> Variant:
@@ -50,12 +80,18 @@ func set_value(key: StringName, value: Variant) -> void:
 	values[key] = value
 	if key in [&"vsync", &"fullscreen", &"render_scale", &"graphics_quality"]:
 		apply_display()
+	if key == &"touch_controls":
+		InputSetup.apply_touch_profile(use_touch_controls())
 	changed.emit(key)
 	save_settings()
 
 
 func reset_defaults() -> void:
 	values = DEFAULTS.duplicate()
+	if is_mobile():
+		for key: StringName in MOBILE_DEFAULTS:
+			values[key] = MOBILE_DEFAULTS[key]
+	InputSetup.apply_touch_profile(use_touch_controls())
 	apply_display()
 	for key: StringName in values:
 		changed.emit(key)
@@ -82,6 +118,12 @@ func save_settings() -> void:
 
 func apply_display() -> void:
 	if DisplayServer.get_name() == "headless":
+		return
+	if is_mobile():
+		var vp_m := get_viewport()
+		if vp_m:
+			vp_m.scaling_3d_scale = clampf(float(get_value(&"render_scale")), 0.5, 1.0)
+			vp_m.msaa_3d = Viewport.MSAA_DISABLED if quality() == 0 else Viewport.MSAA_2X
 		return
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_ENABLED if get_value(&"vsync") else DisplayServer.VSYNC_DISABLED)
 	var want_full: bool = get_value(&"fullscreen")

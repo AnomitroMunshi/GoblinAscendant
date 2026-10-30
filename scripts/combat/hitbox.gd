@@ -16,6 +16,10 @@ signal hit_landed(target: Node3D, result: int, info: DamageInfo)
 
 var owner_actor: Node3D
 var rehit_interval := 0.0
+## When true, a hit only lands if no WORLD geometry lies between the attacker's
+## chest and the target's chest (prevents hitting through walls / cave rock).
+var require_line_of_sight := true
+var los_height := 0.9
 
 var _active := false
 var _time_left := 0.0
@@ -87,6 +91,8 @@ func _try_hit(body: Node3D) -> void:
 			return
 	if not Factions.can_damage(owner_actor, body):
 		return
+	if require_line_of_sight and not _has_line_of_sight(body):
+		return
 	_hit_times[id] = _elapsed
 	var info := _template.copy()
 	info.source = owner_actor
@@ -99,3 +105,12 @@ func _try_hit(body: Node3D) -> void:
 	info.hit_position = body.global_position + Vector3.UP * 0.9
 	var result: int = body.take_damage(info)
 	hit_landed.emit(body, result, info)
+
+
+func _has_line_of_sight(body: Node3D) -> bool:
+	if not is_instance_valid(owner_actor):
+		return true
+	var from := owner_actor.global_position + Vector3.UP * los_height
+	var to := body.global_position + Vector3.UP * los_height
+	var query := PhysicsRayQueryParameters3D.create(from, to, Layers.WORLD)
+	return get_world_3d().direct_space_state.intersect_ray(query).is_empty()

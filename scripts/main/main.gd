@@ -4,6 +4,10 @@ extends Node3D
 ## system in dependency order. A missing part is skipped with a warning so
 ## the project stays runnable while parts are in development.
 
+## Player-only build: the movement playground replaces the world and nothing
+## else is spawned. Set false to build the full game again.
+const PLAYER_ONLY := true
+
 const PARTS := [
 	["World", "res://scripts/world/world.gd"],          # World agent
 	["Player", "res://scripts/player/player.gd"],       # Player & Camera agent
@@ -21,8 +25,15 @@ func _ready() -> void:
 		GameState.pending_load = false
 		if not SaveManager.load_game():
 			push_warning("Continue requested but no valid save; starting fresh.")
-	for entry: Array in PARTS:
-		_add_part(entry[0], entry[1])
+	if PLAYER_ONLY:
+		# Spawn/respawn inside the playground, not at the valley's glade.
+		GameState.checkpoint_position = Vector3(0, 0, 8)
+		GameState.has_safe_position = false
+		_add_part("World", "res://scripts/main/movement_playground.gd")
+		_add_part("Player", "res://scripts/player/player.gd")
+	else:
+		for entry: Array in PARTS:
+			_add_part(entry[0], entry[1])
 	if not parts.has("World"):
 		_add_fallback_ground()
 	if not parts.has("UI"):
@@ -69,6 +80,16 @@ func _add_fallback_ground() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# Without the UI there is no pause menu: Esc releases the mouse, click recaptures it.
+	if not parts.has("UI"):
+		if event.is_action_pressed(&"pause"):
+			GameState.set_menu_open(not GameState.menu_open)
+			get_viewport().set_input_as_handled()
+			return
+		if event is InputEventMouseButton and event.pressed and GameState.menu_open:
+			GameState.set_menu_open(false)
+			get_viewport().set_input_as_handled()
+			return
 	if event.is_action_pressed(&"quick_save") and not GameState.show_title:
 		if SaveManager.save_game():
 			Events.notify.emit("Game saved", &"info")

@@ -29,8 +29,10 @@ func _ready() -> void:
 	for f in [WOLF, GOBLIN_RAIDER, HUMAN_RAIDER, OGRE]:
 		set_relation(PLAYER, f, Relation.HOSTILE)
 		set_relation(FRIEND, f, Relation.HOSTILE)
-	set_relation(HUMAN_RAIDER, ADVENTURER, Relation.HOSTILE)
-	set_relation(WOLF, ADVENTURER, Relation.HOSTILE)
+	# Adventurers and hostile monsters/raiders fight when they meet. Encounters stay
+	# local because every actor has a limited detection radius and a home leash.
+	for f in [WOLF, GOBLIN_RAIDER, HUMAN_RAIDER, OGRE]:
+		set_relation(ADVENTURER, f, Relation.HOSTILE)
 	# Monsters ignore one another so fights stay readable around the player.
 	set_relation(WOLF, GOBLIN_RAIDER, Relation.NEUTRAL)
 	set_relation(OGRE, WOLF, Relation.NEUTRAL)
