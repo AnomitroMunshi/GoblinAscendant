@@ -96,7 +96,7 @@ static func _kick() -> Dictionary:
 		"poses": {
 			"chamber": {"torso": Vector3(-0.15, 0.1, 0), "leg_r": Vector3(1.1, 0, 0.05), "shin_r": -1.2, "leg_l": Vector3(0.05, 0, -0.05), "shin_l": -0.18,
 				"arm_l": Vector3(0.75, 0, -0.3), "fore_l": 1.25, "arm_r": Vector3(0.65, 0, 0.3), "fore_r": 1.2},
-			"contact": {"torso": Vector3(-0.25, -0.1, 0), "leg_r": Vector3(1.45, 0, 0.05), "shin_r": -0.08, "leg_l": Vector3(0.1, 0, -0.05), "shin_l": -0.12,
+			"contact": {"torso": Vector3(-0.3, -0.1, 0), "leg_r": Vector3(1.62, 0, 0.05), "shin_r": -0.08, "leg_l": Vector3(0.1, 0, -0.05), "shin_l": -0.12,
 				"arm_l": Vector3(0.7, 0, -0.4), "fore_l": 1.2, "arm_r": Vector3(0.35, 0, 0.6), "fore_r": 0.8},
 			# Knee-first retraction back to the chamber, then the foot plants.
 			"retract": {"torso": Vector3(-0.1, -0.03, 0), "leg_r": Vector3(1.1, 0, 0.05), "shin_r": -1.2,

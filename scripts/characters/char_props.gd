@@ -62,11 +62,13 @@ static func axe(g: CharGeo, xf: Transform3D, sc: float) -> float:
 	g.loft(xf, [Vector4(0.06 * sc, gr * 1.15, gr * 1.15, 0), Vector4(-0.08 * sc, gr * 1.15, gr * 1.15, 0)], WRAP, 7)
 	g.surf_override = -1
 	# bearded head, blade facing forward (-Z)
-	var head := PackedVector2Array([Vector2(-0.02, -0.66), Vector2(-0.02, -0.82), Vector2(0.06, -0.86), Vector2(0.17, -0.92),
-		Vector2(0.2, -0.78), Vector2(0.18, -0.6), Vector2(0.1, -0.66), Vector2(0.04, -0.7)])
+	var head := PackedVector2Array([Vector2(-0.03, -0.63), Vector2(0.06, -0.655), Vector2(0.13, -0.6), Vector2(0.16, -0.62),
+		Vector2(0.175, -0.7), Vector2(0.165, -0.8), Vector2(0.14, -0.85), Vector2(0.1, -0.79), Vector2(0.05, -0.74), Vector2(-0.03, -0.74)])
 	for i in head.size():
 		head[i] = head[i] * sc
 	g.extrude(xf * Transform3D(Basis.from_euler(Vector3(0, PI * 0.5, 0)), Vector3.ZERO), head, 0.012 * sc, STEEL_DARK, CharGeo.METAL, null, 0.004 * sc)
+	# socket collar around the haft
+	g.loft(xf, [Vector4(-0.62 * sc, gr * 1.6, gr * 1.6, 0), Vector4(-0.75 * sc, gr * 1.6, gr * 1.6, 0)], IRON, 8, true, true, 0.3, CharGeo.METAL)
 	return gr
 
 

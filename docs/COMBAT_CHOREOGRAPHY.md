@@ -42,8 +42,10 @@ Check the live InputMap/controller before relying on these bindings:
 
 ## Implementation map
 
-- `scripts/player/goblin_model.gd`: articulated nodes, `ATTACK_KEYS`, `_attack`, `_rest_combat`, `_target_pose`, `_update_face`, weapon visibility. Preserve joint names and the public animation API.
-- `scripts/player/player.gd`: armed/unarmed attack timing/data, buffered combo state, stamina, lunges, active hitbox windows, holster state and model feed.
+- `scripts/choreography/`: data-driven movesets (`movesets/{unarmed,knife,sword,sling}.gd`, format documented in `choreo_library.gd`), keyframe evaluation (`choreo_pose.gd`), arm IK (`choreo_ik.gd`), procedural weapon meshes (`choreo_weapons.gd`) and the sling projectile (`choreo_sling_stone.gd`). To add a weapon: create a moveset file, register it in `ChoreoLibrary.SOURCES` and add its mesh to `ChoreoWeapons`.
+- `scripts/player/goblin_model.gd`: articulated nodes (incl. ankle pivots `foot_l/foot_r`), weapon sockets/stowing (`set_weapon`), `_attack` (evaluates move data), `_rest_combat` (moveset carry), hand IK + wrist aim, foot planting, sling spin, hurt/cast poses, `_update_face`. Preserve joint names and the public animation API.
+- `scripts/player/player.gd`: resolves the move at attack start, buffered combo state, per-move stamina, footwork (lunge applied once, stops on body contact), data-sized hitboxes, projectile launch, holster/equip (`equip_weapon`, `debug_set_weapon`), guard reduction per moveset, direction-aware hit reactions and the model feed.
+- `tests/choreo_preview.tscn` (windowed): contact sheets per move in `tests/screens/choreo/` (rows: front / side / gameplay camera; columns: anticipation -> contact -> follow-through -> recovery; red box = live hitbox).
 - `scripts/player/player_fx.gd`: trails/impact feedback. Punches/kicks must not receive blade trails; thrusts need directional rather than broad cutting trails.
 - `scripts/combat/hitbox.gd`: shared LOS and once-per-target-per-activation contract; do not bypass it.
 - `scripts/enemies/`: enemy attack/model/FX files; inspect the actual enemy selected in the task before proposing animations.
@@ -71,3 +73,46 @@ $godotExe = 'D:/GODOT/Godot_v4.7.2-stable_win64.exe/Godot_v4.7.2-stable_win64_co
 ```
 
 Use import when class/cache changes need it; run only relevant scenes rather than repeating everything after every small edit. Use the configured Forward+ renderer for final visual judgment. Preserve unrelated user changes and report existing engine warnings accurately.
+
+## Enemy choreography spec (review, 2026-10-31)
+
+This is a report-only review of `scripts/enemies/`. No enemy files were edited; the Combat agent or the lead applies these changes, and the Character Art agent owns enemy model-building. Phases use each enemy's own windup / active / recovery from `EnemyAttack`.
+
+Rules for every enemy:
+- Reach the visible contact pose within the first 40-60 % of the active window.
+- Hold the anticipation pose (not still moving) for the last 30-45 % of the windup.
+- Never let the hitbox exceed the visible weapon or jaw reach.
+
+Shared observations (all humanoids, `enemy_humanoid.gd` `POSES`):
+- Each pose has only 4 numbers (right arm pitch, left arm pitch, torso pitch, torso yaw). With no elbow, wrist or weapon-edge control, chops can land flat-side and thrusts read as arm raises. Proposed: add `fore_r` (elbow) and `grip_x/grip_z` (weapon pitch/roll) channels per pose, using the player convention (+X = forward for limbs).
+- The strike pose snaps in at active start (rate 28-34/s), so contact reads 70-90 ms into a 140-180 ms window. That timing is fine, but arcs (sweep, slash) read as a straight blend. Proposed: a `mid` key at 35 % of the active window.
+- Every attack uses the same step (`leg_l -0.25 / leg_r 0.3` in the windup, `0.45 / -0.3` at the strike). Per-attack steps are proposed in the table.
+- HURT is one backward lean regardless of the hit side. Proposed: use the hit direction (`info.knockback` in body space) like the player does:
+  - front: torso -0.35 and a step back with the rear leg;
+  - behind: torso +0.3 forward;
+  - side: torso roll 0.25 away and a twist of 0.3.
+- Blocking has no impact reaction. Proposed: on BLOCKED, push both guard arms back 0.25 rad and torso -0.15 for 0.15 s, plus a 0.15 m slide back.
+
+| Enemy / attack (anim) | Windup -> active -> recovery (s) | Anticipation (held) | Contact | Follow-through / recovery | Telegraph cue |
+|---|---|---|---|---|---|
+| Wolf lunge (`lunge`) | 0.50 -> 0.30 -> 0.80 | Crouch: body_y 0.42, rear legs loaded 0.6, head low -0.25, tail rigid; step_back 1.2 m/s. Hold the last 0.2 s still. | Body extended (0.75), forelegs reaching 1.1, jaws open. Reach the pose within 0.12 s. | Forelegs plant, head drops 0.1, then the wolf turns away (circles). | Growl at windup start, head locked on the target. |
+| Wolf bite (`bite`) | 0.375 -> 0.14 -> 0.64 | DEFECT: plays the same crouch/lunge poses as the lunge. Proposed: no crouch; head pulls back 0.25, front legs braced. | Head snaps forward 0.45 with the jaw open 0.5 rad within 60 ms. Body stays put (no lunge). | Jaw closes, head shakes twice (yaw ±0.15), step back. | Short snarl, clearly distinct from the lunge's deep crouch. |
+| Alpha pounce (`lunge`, heavy) | 0.95 -> 0.40 -> 1.20 | Deeper crouch (body_y 0.36) and a 0.25 s shoulder tremble at the end of the windup; step_back 1.5. | Airborne arc: body pitch -0.3 rising to +0.2 landing; add a 0.4 m vertical hop. | Heavy landing (squash 0.15 s), then a 0.4 s punishable recovery. | Howl, eyes brighten. |
+| Goblin raider chop (`chop`) | 0.42 -> 0.14 -> 0.60 | Arm 2.8 overhead, torso back 0.18, yaw 0.35, rear-leg step 0.3; held 0.19 s. | Arm 1.0, torso -0.35, yaw -0.15, front leg 0.45; grip pitch -1.2 so the edge leads. | Hold 45 % of the recovery, then hop back. | Arm raise over 55 % of the windup. |
+| Goblin raider jab (`thrust`) | 0.29 -> 0.12 -> 0.42 | Arm -0.6 drawn back, torso yaw 0.55; hold at least 0.12 s. | Arm 1.55 straight, yaw -0.35, front-foot step 0.5. | Snap back to guard. | Shoulder-back hold. |
+| Human raider slash (`sweep`) | 0.62 -> 0.18 -> 0.80 | Arm 1.5 out to the side, torso yaw 1.1, weight on the rear leg; hold the last 0.25 s. | Mid key yaw 0 at 35 % of the active window, then -1.1; grip roll 1.57 so the edge faces the sweep. | Hold 45 %, then return to `GUARD_POSE` (not idle) when block_chance > 0. | Raised-arm hold. |
+| Human raider axe chop (`chop`, heavy) | 0.93 -> 0.16 -> 1.04 | Raise over 0.5 s to arm 2.9 with torso back 0.25, then hold 0.4 s with the existing tremble. | Arm 0.9, torso -0.45, deep front-knee bend (crouch 0.12). | Axe stays down 0.35 s ("embedded"), then is pulled free (arm 1.3). This is the punish window. | `enemy_warn` plus an exhale. |
+| Human raider block | n/a | `GUARD_POSE` is fine; add crouch 0.06 and a 0.1 s raise blend. | Guard recoil on block (see above). | Lower over 0.2 s, never instantly. | None. |
+| Raider captain overhead (`chop`, heavy) | 0.85 -> 0.16 -> 0.99 | As the axe chop; the torch arm stays forward for balance (arm_l 0.9). | As the axe chop. | As the axe chop. | Warn sound. |
+| Raider captain flame sweep (`flame`) | 1.40 -> 0.30 -> 1.50 | Torch arm 2.9 up, torso back 0.25, yaw 0.5, flare ramp and 1.7 m marker (present). Add a 0.3 step back in the first 0.4 s. | Sweep the torch right to left across the whole 0.30 s (yaw +0.5 -> -0.6 linear, not a snap), torso -0.3. | Torch held low 0.5 s (vulnerable). | Flare + marker (good). |
+| Ogre club smash (`smash`) | 1.60 -> 0.18 -> 1.90 | Both arms 3.0 overhead, torso back 0.35, a 0.4 s held peak, wide feet; marker at the impact point (present). | Arms 0.75, torso -0.6, hips drop 0.15. The club head must reach the marker centre: the hitbox is at z -3.0, so verify the club length. | Club stays grounded 0.8 s (punish); shockwave FX at contact. | Marker + warn + shake. |
+| Ogre club sweep (`sweep`) | 1.25 -> 0.30 -> 1.40 | Arm 1.4, torso yaw 1.25 coiled right, weight on the right leg. | Travel across the full 0.30 s (mid key at yaw 0), ending at yaw -1.3. | Torso continues to -1.4 and holds 0.5 s. | 4 m ring (present). |
+| Ogre stomp (`stomp`, unblockable) | 1.00 -> 0.15 -> 1.10 | Right knee up (`STOMP_LEG`), arms out (arm_z ±0.6), torso back 0.1. | Foot slams within 50 ms; whole-body drop 0.1. | Dust ring; foot stays planted 0.4 s. | 3 m purple ring (present). |
+| Ogre charge (enraged) | 1.30 -> 1.10 -> 2.20 | Torso forward 0.6, pawing step, roar. | Run cycle keeps playing during the active window (not a frozen pose); head down. | Stumble stop: torso -0.3, 0.6 s dizzy sway (punish). | Roar + dust trail. |
+
+Hit-reaction notes for all enemies:
+- Light hit (stagger < 0.5): additive 0.15 s flinch away from the hit, no state change.
+- Stagger: HURT with a step away from the hit.
+- Heavy hit (`is_heavy`, stagger >= 0.9): larger recoil plus a knock-back slide.
+- Wolves: head jerk away plus a hind-leg skid.
+- Ogre: super armour; only heavy hits cause a flinch (head turn 0.2).

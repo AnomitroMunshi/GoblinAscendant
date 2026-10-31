@@ -274,7 +274,7 @@ static func _torso(g: CharGeo, d: Dictionary, S: float, sh_y: float, neck_y: flo
 	var colfn := func(p: Vector3, _r: int, _c: int) -> Color:
 		if bare:
 			return skin
-		if p.y > sh_y * 1.0:
+		if p.y > neck_y - sh_y * 0.09:
 			return skin if vneck != &"high" else top
 		if vneck == &"v" and p.z < 0.0 and p.y > sh_y * 0.72 and absf(p.x) < (p.y - sh_y * 0.72) * 0.9:
 			return skin
@@ -370,13 +370,13 @@ static func _head(g: CharGeo, d: Dictionary, hh: float, S: float, hunch: float) 
 
 # ================================================================== limbs
 static func _upper_arm(g: CharGeo, d: Dictionary, side: float, upper: float, mass: float, H: float) -> void:
-	var r := 0.027 * H * mass
+	var r := 0.031 * H * mass
 	var skin: Color = d["skin"]
 	var sleeves: int = d["sleeves"]
 	var top: Color = d["top_col"]
 	var cloth := sleeves > 0 and top.a > 0.0
 	var sleeve_end := -upper * (0.45 if sleeves == 1 else 1.1)
-	var rings := [Vector4(0.035 * H, r * 0.8, r * 0.85, 0), Vector4(0.0, r * 1.12, r * 1.08, 0), Vector4(-upper * 0.3, r * 1.0, r * 0.98, 0),
+	var rings := [Vector4(0.012 * H, r * 0.55, r * 0.6, 0), Vector4(-0.004 * H, r * 1.05, r * 1.0, 0), Vector4(-upper * 0.3, r * 1.0, r * 0.98, 0),
 		Vector4(-upper * 0.7, r * 0.86, r * 0.85, 0), Vector4(-upper * 1.02, r * 0.74, r * 0.74, 0.004)]
 	var colfn := func(p: Vector3, _r: int, _c: int) -> Color:
 		return top if cloth and p.y > sleeve_end else skin
@@ -384,7 +384,7 @@ static func _upper_arm(g: CharGeo, d: Dictionary, side: float, upper: float, mas
 	g.loft(Transform3D(Basis(), Vector3(side * -0.002, 0, 0)), rings, colfn, 14, true, true)
 	# deltoid: rounded cap that overlaps the torso so the shoulder reads as one mass
 	var dc: Color = top if cloth else skin
-	g.ellipsoid(Transform3D(Basis.from_euler(Vector3(0, 0, -side * 0.35)), Vector3(-side * r * 0.25, -r * 0.35, 0)), Vector3(r * 1.32, r * 1.75, r * 1.2), dc, 14, 9)
+	g.ellipsoid(Transform3D(Basis.from_euler(Vector3(0, 0, -side * 0.5)), Vector3(-side * r * 0.35, -r * 0.55, 0)), Vector3(r * 1.25, r * 1.85, r * 1.18), dc, 16, 10)
 	g.surf_override = -1
 	if cloth and sleeves == 1:
 		# short sleeve cuff stands off the arm a little
@@ -393,7 +393,7 @@ static func _upper_arm(g: CharGeo, d: Dictionary, side: float, upper: float, mas
 
 static func _forearm(g: CharGeo, d: Dictionary, side: float, fore: float, hand_l: float, mass: float, H: float,
 		att: Transform3D, item: StringName) -> void:
-	var r := 0.024 * H * mass
+	var r := 0.028 * H * mass
 	var skin: Color = d["skin"]
 	var sleeves: int = d["sleeves"]
 	var top: Color = d["top_col"]

@@ -129,9 +129,10 @@ User confirmed: each weapon must have a separate moveset, not the same animation
 
 - ⬜ Add distinct blunt-weapon, pointed-weapon, sling, shield+sword, shield+axe, spear, two-handed sword and two-handed hammer movesets. Specific combo tuning remains to be authored; do not reuse knife poses for every weapon.
 
-- ⬜ Add weapon/moveset definitions: mesh/grip, light-combo entries, heavy attack, timing, stamina costs, damage/stagger/knockback, lunge, guard effectiveness, animation poses, hitbox offsets/sizes and trails.
-- ⬜ Replace the single hard-coded Player ATTACKS/model ATTACK_KEYS lookup with equipped-weapon data. Keep input actions consistent; resolve the weapon/moveset at attack start so an equip change cannot alter an attack halfway through.
-- ⬜ Implement knife third-hit stab and heavy thrust first; current corrected knife animations still use descending strikes. Stabs need a short directional trail rather than a broad slash arc.
+- ✅ Weapon/moveset definitions are data (`scripts/choreography/movesets/`): grip, light chain, heavy, timing, stamina, damage/stagger/knockback, footwork, guard reduction, key poses, hitbox size/offset and trails. Chapter 1 movesets: unarmed, rough knife, short sword (Battered Short Sword pickup calls `player.equip_weapon(&"sword")`) and sling. Until pickups exist, sword/sling are reachable through the debug numpad switch. Axe, spear, hammer and Hobgoblin variants are not authored (scope cut, 2026-10-31).
+- ✅ The hard-coded Player ATTACKS/model ATTACK_KEYS are replaced by `ChoreoLibrary`; the move is resolved at attack start; `equip_weapon(type)` refuses mid-attack.
+- ✅ Knife third hit is a stab and the heavy is a committed lunging thrust, both with directional thrust trails. Cut trails now sweep across the active window.
+- 🟡 Visual acceptance of the knife/sword/sling movesets is pending the user hand-check (previews in `tests/screens/choreo/`).
 - ⬜ Animate both hands only when required by grip/attack. Off-hand may balance or guard during one-handed attacks, but must not mimic gripping an invisible second handle. Add authored two-hand placement for the axe; no new manual rigging workflow required.
 - ⬜ Give each weapon distinct guard pose/effectiveness, attack reach, recovery and audio/VFX. Dodge remains a shared movement action; weapon pose must blend into and out of it cleanly.
 - ⬜ Refuse or defer equipment changes while attacking; reset combo on an accepted switch. Save equipped weapon and restore its moveset without granting unowned equipment.
@@ -170,6 +171,19 @@ Revised Chapter 1 weapon path: rough knife → optional ordinary weapon finds �
 
 ## Progress log
 ### 2026-10-31
+- Lead: user cut the draft to "only the combat Chapter 1 needs".
+  - Character Art stopped and deferred. Enemies keep their current working models; enemy files were unchanged since 336ef54 and combat is still 93/93. Its kit in `scripts/characters/` stays unused.
+  - Choreography is wrapping up. It keeps knife, sword, sling and unarmed, matching the story draft's first-build scope (STORY_CHAPTER_1.md line 11). The enemy spec is already written; further enemy motion work is deferred.
+  - Story-draft items still pending implementation: the sword pickup equip path, wolf carcasses, wildlife scenes and the search party.
+- Combat choreography, first draft (Goblin only; scope cut to knife, sword, sling and unarmed).
+  - Moved all attack data out of `player.gd` / `goblin_model.gd` into `scripts/choreography/` (`ChoreoLibrary`, `ChoreoPose`, `ChoreoIK`, `ChoreoWeapons`, `ChoreoSlingStone`). Hitboxes, timing, footwork, stamina, trails and guard values now come from data.
+  - Knife: cut, backhand cut, finishing stab, committed lunging thrust. Unarmed: alternating punches with torso rotation, front kick (chamber, extend, knee-first retract, plant). Short sword: diagonal cut, returning horizontal cut, finishing thrust, descending heavy cut (hand IK + wrist aim). Sling: quick side-arm whirl and release, plus a heavy overhead wind-up, launching a player-owned stone projectile (Hitbox, wall ray, single hit).
+  - Model: ankle pivots plus foot planting (solved hip height, flat soles), direction-aware flinch/stagger, knee-drop knockdown and guard-break reactions within the existing hurt times, and blocked-hit guard recoil. Skill-specific cast poses (Flame Burst: palm to mouth then push; Stone Guard: crouch, palm to ground); the weapon stays in hand. Attack mouth stays closed.
+  - Controller: lunges stop on actor contact (no sliding around targets). Stage loadout check in `equip_weapon`. Debug numpad 1-4 weapon switch in the playground only (debug builds).
+  - New previews: `tests/choreo_preview.tscn` writes contact sheets to `tests/screens/choreo/`.
+  - Results: player tests 79/79; player-only and `-- --full` headless boots clean apart from the existing ObjectDB leak warning.
+  - Chapter 1 scope: knife, sword, sling, unarmed (per `docs/STORY_CHAPTER_1.md`). The enemy choreography spec draft in `docs/COMBAT_CHOREOGRAPHY.md` is deferred (not yet reviewed by Combat).
+  - Pending: user hand-check of feel; a `cycle_weapon` input action and skill-aware cast origins need lead/progression integration.
 - Lead: WORLD DONE for the first draft. Realism round 2 accepted.
   - Changes: ruined castle on a crag behind layered hazy ridges, clouds, ledged waterfall cliff, natural cave mouth, blended moss, dark reflective water, broken ruins, weathered wood.
   - Lead verified in the integrated full game, windowed, with the player camera (`tests/full_walk.tscn -- --full`): all 11 areas walkable and grounded at 57–170 fps on high (1600×900, RX 6600 XT). Discovery toasts, compass, XP and enemy telegraphs work live.

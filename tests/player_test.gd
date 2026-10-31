@@ -267,6 +267,81 @@ func _run() -> void:
 	check(not player.is_weapon_holstered() and player.model.sword.visible, "H draws knife again")
 	check(not player.model.get_node("ScaleRoot/roll/hips/StowedKnife").visible, "drawing hides waist copy")
 
+	print("-- weapon movesets (choreography data)")
+	for t: StringName in ChoreoLibrary.types():
+		var errs := ChoreoLibrary.validate(t)
+		check(errs.is_empty(), "moveset %s valid %s" % [t, errs])
+	check(not ChoreoLibrary.has(&"spear") and not ChoreoLibrary.has(&"axe"), "only knife/sword/sling/unarmed authored")
+	check(ChoreoLibrary.reach(ChoreoLibrary.light_chain(&"sword")[0]) > ChoreoLibrary.reach(ChoreoLibrary.light_chain(&"knife")[0]), "sword out-reaches knife")
+	await place(Vector3(80, 0.1, 60), 0.0)
+	player.stamina = player.max_stamina
+	check(player.equip_weapon(&"sword") and player.get_weapon_type() == &"sword" and player.model.weapon_type == &"sword", "equip_weapon readies sword")
+	check(not player.model._knife_node.visible and player.model.get_node("ScaleRoot/roll/hips/StowedKnife").visible, "knife stowed at waist while sword drawn")
+	var d2: CharacterBody3D = DummyScript.new()
+	add_child(d2)
+	d2.global_position = player.global_position + player.get_facing() * 1.05
+	await frames(4)
+	await tap(&"attack_light")
+	var mv := player.get_attack_move()
+	check(mv.get("id") == &"sword_cut1" and player.model.anim_action == &"sword_cut1", "LMB uses sword moveset (cut1)")
+	check(not player.equip_weapon(&"knife"), "cannot switch weapon mid-attack")
+	await wait(float(mv["windup"]) + 0.03)
+	var box := player._hitbox.get_child(0) as CollisionShape3D
+	check(((box.shape as BoxShape3D).size - (mv["hitbox"]["size"] as Vector3)).length() < 0.001, "hitbox size comes from move data")
+	await wait(0.6)
+	check(d2.hits == 1, "sword cut reaches 1.05 m target once (hits=%d)" % d2.hits)
+	# reach: knife misses a target that the sword thrust can reach
+	await wait(0.5)
+	player.equip_weapon(&"knife")
+	d2.global_position = player.global_position + player.get_facing() * 1.75
+	d2.hits = 0
+	await frames(3)
+	await tap(&"attack_light")
+	await wait(0.7)
+	check(d2.hits == 0, "knife cut cannot reach 1.75 m (hits=%d)" % d2.hits)
+	# sling projectile
+	await wait(0.6)
+	check(player.equip_weapon(&"sling"), "equip sling")
+	d2.global_position = player.global_position + player.get_facing() * 6.0
+	d2.hits = 0
+	await frames(3)
+	await tap(&"attack_light")
+	await wait(1.2)
+	check(d2.hits == 1, "sling stone hits 6 m target once (hits=%d)" % d2.hits)
+	check(get_tree().get_nodes_in_group(&"player").size() == 1 and find_children("SlingStone", "", true, false).is_empty(), "stone removed after hit")
+	# hit reactions
+	await wait(0.5)
+	player.equip_weapon(&"knife")
+	var behind := Node3D.new()
+	add_child(behind)
+	behind.global_position = player.global_position - player.get_facing() * 2.0
+	var hinfo := DamageInfo.make(1.0, behind, 3.0, 0.6)
+	player.take_damage(hinfo)
+	check(player.state == Player.State.HURT and player.model.hurt_kind == &"stagger" and player.model.hurt_dir.y < -0.9, "stagger from behind is direction-aware")
+	await wait(0.9)
+	var front := Node3D.new()
+	add_child(front)
+	front.global_position = player.global_position + player.get_facing() * 2.0
+	var heavy_hit := DamageInfo.make(1.0, front, 8.0, 1.0)
+	heavy_hit.is_heavy = true
+	player.take_damage(heavy_hit)
+	check(player.model.hurt_kind == &"knockdown" and player._hurt_time <= 0.55 + 0.001, "heavy hit = knockdown within existing hurt time")
+	await wait(1.0)
+	behind.queue_free()
+	front.queue_free()
+	# grip-aware cast keeps the weapon in hand
+	player.equip_weapon(&"sword")
+	await wait(0.3)
+	player.play_cast_animation_for(&"flame_burst")
+	check(player.state == Player.State.CAST and player.model.cast_skill == &"flame_burst", "skill-specific cast pose selected")
+	await wait(0.15)
+	check(player.model.sword.visible and player.model.anim_state == &"cast", "weapon stays in hand while casting")
+	await wait(0.5)
+	check(player.state != Player.State.CAST, "cast ends on time")
+	check(player.debug_set_weapon(&"knife") == OS.is_debug_build(), "debug_set_weapon works in debug builds")
+	d2.queue_free()
+	await wait(0.3)
+
 	print("-- lock-on")
 	player.camera_rig.yaw = 0.0
 	player.camera_rig._apply_rotation()

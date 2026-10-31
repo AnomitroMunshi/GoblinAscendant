@@ -158,9 +158,9 @@ static func validate(type: StringName) -> PackedStringArray:
 			last = float(key[0])
 			if key[1] != "rest" and not (m["poses"] as Dictionary).has(key[1]):
 				errs.append("%s: unknown pose %s" % [id, key[1]])
-			if key[1] == "contact":
+			if key[1] == "contact" and not has_contact:
 				has_contact = true
-				# Visible contact must land inside the active window.
+				# Visible contact (first arrival; later keys may hold it) must land inside the active window.
 				if float(key[0]) < 1.0 or float(key[0]) > 2.0:
 					errs.append("%s: contact key outside active window (%.2f)" % [id, key[0]])
 		if not has_contact:

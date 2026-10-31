@@ -365,9 +365,9 @@ static func hair(g: CharGeo, xf: Transform3D, p: Dictionary, style: StringName, 
 	var dark := col.darkened(0.18)
 	match style:
 		&"crop":
-			skull_shell(g, xf, p, [col, col, col], 0.012, 0.95, 0.35, -0.2)
+			skull_shell(g, xf, p, [col, col, col], 0.014, 0.74, 0.12, -0.6)
 		&"short", &"white_short":
-			skull_shell(g, xf, p, [dark, col, col], 0.03, 0.9, 0.3, -0.35, CharGeo.MATTE, 24, 0.6)
+			skull_shell(g, xf, p, [dark, col, col], 0.03, 0.72, 0.1, -0.66, CharGeo.MATTE, 24, 0.6)
 			# a few swept locks break the helmet-like silhouette
 			for i in 5:
 				var a := -0.5 + float(i) * 0.25
@@ -375,7 +375,7 @@ static func hair(g: CharGeo, xf: Transform3D, p: Dictionary, style: StringName, 
 				var tip := head_point(p, 0.75, a + 0.15, 0.045) + Vector3(0, 0, -0.04)
 				g.tube(_xfa(xf, [root, root.lerp(tip, 0.5) + Vector3(0, 0.02, 0), tip]), [_s(xf, 0.05), _s(xf, 0.04), _s(xf, 0.012)], col, 5)
 		&"swept":
-			skull_shell(g, xf, p, [dark, col, col], 0.035, 0.85, 0.25, -0.4, CharGeo.MATTE, 24, 0.9)
+			skull_shell(g, xf, p, [dark, col, col], 0.04, 0.7, 0.08, -0.7, CharGeo.MATTE, 24, 0.9)
 		&"bob":
 			skull_shell(g, xf, p, [dark, col, col], 0.04, 0.82, -0.55, -0.75, CharGeo.MATTE, 24, 0.5, 0.25)
 		&"bun":
@@ -534,8 +534,8 @@ static func boot(g: CharGeo, xf: Transform3D, fl: float, r: float, top: float, c
 			g.loft(xf, [Vector4(top - top_r * 0.7, top_r * 1.1, top_r * 1.1, 0.0), Vector4(top + top_r * 0.12, top_r * 1.16, top_r * 1.16, 0.0)], col.lightened(0.04), 12, true, true)
 	# foot: lofted along -Z, low and wide at the toe
 	var fx := xf * Transform3D(Basis.from_euler(Vector3(-PI * 0.5, 0, 0)), Vector3(0, -r * 0.55, fl * 0.12))
-	g.loft(fx, [Vector4(-fl * 0.05, r * 0.95, r * 0.95, 0.0), Vector4(fl * 0.3, r * 1.0, r * 0.85, r * 0.15),
-		Vector4(fl * 0.7, r * 1.05, r * 0.62, r * 0.32), Vector4(fl * 0.92, r * 0.85, r * 0.5, r * 0.36)], [col, col, col, dark], 9, true, true, 0.4)
+	g.loft(fx, [Vector4(-fl * 0.08, r * 1.0, r * 1.05, 0.0), Vector4(fl * 0.3, r * 1.05, r * 1.0, r * 0.1),
+		Vector4(fl * 0.68, r * 1.08, r * 0.78, r * 0.3), Vector4(fl * 0.9, r * 0.9, r * 0.6, r * 0.42)], [col, col, col, dark], 10, true, true, 0.4)
 	g.frustum(xf * Transform3D(Basis(), Vector3(0, -r * 1.12, -fl * 0.33)), r * 0.24, Vector2(r * 1.0, fl * 0.53), Vector2(r * 1.02, fl * 0.53), sole)
 
 

@@ -56,6 +56,8 @@ static func material(surface: int) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
 	m.vertex_color_is_srgb = true
+	# open cloth, armour lames and hair shells are visible from inside
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	match surface:
 		METAL:
 			m.metallic = 0.6
@@ -185,6 +187,10 @@ func grid(rows: Array, cols: Variant, wrap: bool, smooth: bool = true, surf: int
 		for p in pr:
 			s += p
 		cent.append(s / float(maxi(pr.size(), 1)))
+	var gc := Vector3.ZERO
+	for cc in cent:
+		gc += cc
+	gc /= float(nr)
 	var colors: Array = []
 	for r in nr:
 		var pr2: PackedVector3Array = rows[r]
@@ -200,12 +206,28 @@ func grid(rows: Array, cols: Variant, wrap: bool, smooth: bool = true, surf: int
 			rc.append(col)
 		colors.append(rc)
 	var span := nc if wrap else nc - 1
-	# outward references + smooth normals
+	# Orientation: every quad uses the same topological winding; one global sign
+	# (from the summed outward flux) decides whether the whole grid flips. This is
+	# robust on caps, poles and tight curves where a local reference is ambiguous.
+	var flux := 0.0
+	for r in nr - 1:
+		for ci in span:
+			var c2 := (ci + 1) % nc
+			var a: Vector3 = rows[r][ci]
+			var d: Vector3 = rows[r + 1][c2]
+			var b: Vector3 = rows[r][c2]
+			var c: Vector3 = rows[r + 1][ci]
+			var fn := (d - a).cross(b - a) + (c - a).cross(d - a)
+			var center := (a + b + c + d) * 0.25
+			var ref := out_dir if out_dir != Vector3.ZERO else center - gc
+			flux += fn.dot(ref)
+	var sgn := 1.0 if flux >= 0.0 else -1.0
+	if flip:
+		sgn = -sgn
 	var normals: Array = []
 	if smooth:
 		normals.resize(nr * nc)
 		normals.fill(Vector3.ZERO)
-	var faces: Array = []  # [r, c, r2, c2, out]
 	for r in nr - 1:
 		for ci in span:
 			var c2 := (ci + 1) % nc
@@ -213,51 +235,38 @@ func grid(rows: Array, cols: Variant, wrap: bool, smooth: bool = true, surf: int
 			var b: Vector3 = rows[r][c2]
 			var c: Vector3 = rows[r + 1][ci]
 			var d: Vector3 = rows[r + 1][c2]
-			var center := (a + b + c + d) * 0.25
-			var out: Vector3
-			if out_dir != Vector3.ZERO:
-				out = out_dir
-			else:
-				out = center - (cent[r] + cent[r + 1]) * 0.5
-				if out.length_squared() < 1e-10:
-					out = center - (cent[0] + cent[nr - 1]) * 0.5
-			if flip:
-				out = -out
-			faces.append([r, ci, c2, out])
+			var fn := ((d - a).cross(b - a) + (c - a).cross(d - a)) * sgn
 			if smooth:
-				for t in [[a, b, d], [a, d, c]]:
-					var fn: Vector3 = (t[1] - t[0]).cross(t[2] - t[0])
-					if fn.dot(out) < 0.0:
-						fn = -fn
-					for idx: int in [r * nc + ci, r * nc + c2, (r + 1) * nc + ci, (r + 1) * nc + c2]:
-						normals[idx] = (normals[idx] as Vector3) + fn
-	for f: Array in faces:
-		var r: int = f[0]
-		var ci: int = f[1]
-		var c2: int = f[2]
-		var out: Vector3 = f[3]
-		var pa: Vector3 = rows[r][ci]
-		var pb: Vector3 = rows[r][c2]
-		var pc: Vector3 = rows[r + 1][ci]
-		var pd: Vector3 = rows[r + 1][c2]
-		var ka: Color = colors[r][ci]
-		var kb: Color = colors[r][c2]
-		var kc: Color = colors[r + 1][ci]
-		var kd: Color = colors[r + 1][c2]
-		var na := Vector3.ZERO
-		var nb := Vector3.ZERO
-		var nc2 := Vector3.ZERO
-		var nd := Vector3.ZERO
-		if smooth:
-			na = (normals[r * nc + ci] as Vector3).normalized()
-			nb = (normals[r * nc + c2] as Vector3).normalized()
-			nc2 = (normals[(r + 1) * nc + ci] as Vector3).normalized()
-			nd = (normals[(r + 1) * nc + c2] as Vector3).normalized()
-		tri(pa, pb, pd, ka, kb, kd, out, surf, na, nb, nd)
-		tri(pa, pd, pc, ka, kd, kc, out, surf, na, nd, nc2)
-		if double:
-			tri(pa, pb, pd, ka, kb, kd, -out, surf, -na, -nb, -nd)
-			tri(pa, pd, pc, ka, kd, kc, -out, surf, -na, -nd, -nc2)
+				for idx: int in [r * nc + ci, r * nc + c2, (r + 1) * nc + ci, (r + 1) * nc + c2]:
+					normals[idx] = (normals[idx] as Vector3) + fn
+	for r in nr - 1:
+		for ci in span:
+			var c2 := (ci + 1) % nc
+			var pa: Vector3 = rows[r][ci]
+			var pb: Vector3 = rows[r][c2]
+			var pc: Vector3 = rows[r + 1][ci]
+			var pd: Vector3 = rows[r + 1][c2]
+			var ka: Color = colors[r][ci]
+			var kb: Color = colors[r][c2]
+			var kc: Color = colors[r + 1][ci]
+			var kd: Color = colors[r + 1][c2]
+			var na := Vector3.ZERO
+			var nb := Vector3.ZERO
+			var nc2 := Vector3.ZERO
+			var nd := Vector3.ZERO
+			if smooth:
+				na = (normals[r * nc + ci] as Vector3).normalized()
+				nb = (normals[r * nc + c2] as Vector3).normalized()
+				nc2 = (normals[(r + 1) * nc + ci] as Vector3).normalized()
+				nd = (normals[(r + 1) * nc + c2] as Vector3).normalized()
+			# per-triangle outward = its own topological normal times the grid sign
+			var o1 := (pd - pa).cross(pb - pa) * sgn
+			var o2 := (pc - pa).cross(pd - pa) * sgn
+			tri(pa, pb, pd, ka, kb, kd, o1, surf, na, nb, nd)
+			tri(pa, pd, pc, ka, kd, kc, o2, surf, na, nd, nc2)
+			if double:
+				tri(pa, pb, pd, ka, kb, kd, -o1, surf, -na, -nb, -nd)
+				tri(pa, pd, pc, ka, kd, kc, -o2, surf, -na, -nd, -nc2)
 
 
 # ------------------------------------------------------------------ lofts

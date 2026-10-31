@@ -45,6 +45,9 @@ static func _cut1() -> Dictionary:
 				"hand_r": Vector3(0.28, 0.44, 0.04), "aim": Vector3(0.45, 0.65, 0.6), "edge": Vector3(-0.3, 0.4, -0.85),
 				"arm_l": Vector3(0.95, 0, -0.2), "fore_l": 0.6,
 				"leg_l": Vector3(0.28, 0, -0.04), "shin_l": -0.2, "leg_r": Vector3(-0.28, 0, 0.05), "shin_r": -0.35},
+			# Mid-sweep: blade tip out to the upper right, already travelling forward.
+			"sweep": {"torso": Vector3(0.08, -0.1, 0), "head": Vector3(0, 0.1, 0),
+				"hand_r": Vector3(0.24, 0.3, -0.2), "aim": Vector3(0.55, 0.5, -0.65), "edge": Vector3(-0.5, -0.4, -0.6)},
 			# Blade crosses the centre line at chest height.
 			"contact": {"torso": Vector3(0.2, 0.35, 0), "head": Vector3(-0.05, -0.3, 0),
 				"hand_r": Vector3(0.03, 0.1, -0.34), "aim": Vector3(-0.6, -0.25, -0.75), "edge": Vector3(-0.6, -0.7, 0.3),
@@ -54,7 +57,7 @@ static func _cut1() -> Dictionary:
 			"follow": {"torso": Vector3(0.28, 0.7, 0), "head": Vector3(-0.08, -0.55, 0),
 				"hand_r": Vector3(-0.14, 0.0, -0.24), "aim": Vector3(-0.85, -0.45, -0.1), "edge": Vector3(0.0, -0.6, 0.8)},
 		},
-		"curve": [[1.0, "antic"], [1.45, "contact", "linear"], [2.3, "follow", "out2"], [3.0, "rest"]],
+		"curve": [[1.0, "antic"], [1.2, "sweep", "in2"], [1.5, "contact", "linear"], [2.3, "follow", "out2"], [3.0, "rest"]],
 	}
 
 
