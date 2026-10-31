@@ -92,9 +92,11 @@ func test_quest_chain() -> void:
 	_fresh()
 	_chapter_done = 0
 	check(Quests.is_quest_active(&"a_small_beginning"), "q1 active on new game")
-	eq(Quests.get_objective_text(), "Look around the glade", "q1 step 1 text")
+	eq(Quests.get_objective_text(), "Walk to the north edge of the glade", "q1 step 1 text")
 	check(Quests.get_objective_position() != null, "objective has a compass position")
 	Events.zone_entered.emit(&"glade")
+	eq(Quests.get_step_index(&"a_small_beginning"), 0, "spawning inside the glade zone doesn't complete step 1")
+	Events.zone_entered.emit(&"glade_edge")
 	eq(Quests.get_objective_text(), "Read the signpost", "q1 step 2")
 	check(Progression.is_discovered(&"glade"), "glade discovered")
 	Events.interacted.emit(&"glade_signpost", null)
@@ -219,7 +221,7 @@ func test_save_roundtrip() -> void:
 func test_load_mid_quest() -> void:
 	# Save at "Defeat the raiders" with 2 kills; load -> kills restart (guards respawn).
 	_fresh()
-	Events.zone_entered.emit(&"glade")
+	Events.zone_entered.emit(&"glade_edge")
 	Events.interacted.emit(&"glade_signpost", null)
 	Events.zone_entered.emit(&"rescue_site")
 	Events.enemy_killed.emit(null, &"goblin_raider", [&"rescue_guard"])

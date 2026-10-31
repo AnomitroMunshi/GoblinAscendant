@@ -36,6 +36,9 @@ const SUPPLY_POSITIONS: Array[Vector3] = [Vector3(168, 0, -166), Vector3(80, 0, 
 
 ## Positions of quest props (QuestWorld). Y is resolved with GameState.ground_height.
 const SIGNPOST_POS := Vector3(-18, 0, 178)
+## First movement objective: the glade's north edge, ~28 m from the spawn point
+## (the spawn sits inside the glade landmark zone, so that zone can't be the goal).
+const GLADE_EDGE_POS := Vector3(-8, 0, 158)
 const NIB_RESCUE_POS := Vector3(-148, 0, 12)
 const NIB_HOME_POS := Vector3(191, 0, -194)
 const HEARTH_POS := WorldLayout.CAVE_INTERIOR
@@ -88,7 +91,7 @@ const QUESTS: Array[Dictionary] = [
 		"id": &"a_small_beginning", "title": "A Small Beginning", "xp": 50, "requires": [],
 		"summary": "Get your bearings in the glade.",
 		"steps": [
-			{"text": "Look around the glade", "type": "zone", "target": &"glade", "pos": WorldLayout.START_GLADE},
+			{"text": "Walk to the north edge of the glade", "type": "zone", "target": &"glade_edge", "pos": GLADE_EDGE_POS},
 			{"text": "Read the signpost", "type": "interact", "target": &"glade_signpost", "pos": SIGNPOST_POS,
 				"on_complete": [{"notify": "Someone is crying for help in the woods to the west..."}]},
 		],

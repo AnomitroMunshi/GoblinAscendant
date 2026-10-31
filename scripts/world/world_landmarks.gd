@@ -52,6 +52,20 @@ func gp(x: float, z: float, up: float = 0.0) -> Vector3:
 	return Vector3(x, terrain.height_at(x, z) + up, z)
 
 
+var _tree_body: StaticBody3D
+
+
+## Shared body for dead trees / snags placed by the areas (Layers.TREES).
+func tree_body() -> StaticBody3D:
+	if _tree_body == null:
+		_tree_body = StaticBody3D.new()
+		_tree_body.name = "AreaTreesBody"
+		_tree_body.collision_layer = Layers.TREES
+		_tree_body.collision_mask = 0
+		add_child(_tree_body)
+	return _tree_body
+
+
 func _body(n: String) -> StaticBody3D:
 	var b := StaticBody3D.new()
 	b.name = n
@@ -245,7 +259,7 @@ func _glade() -> void:
 	cap.height = len + 1.4
 	cs.shape = cap
 	cs.transform = Transform3D(lb * Basis(Vector3.RIGHT, PI * 0.5), mid)
-	body.add_child(cs)
+	tree_body().add_child(cs)
 	world.add_blocker(mid.x, mid.z, 5.5)
 	# mushrooms along the log
 	for k in 7:
@@ -309,7 +323,7 @@ func _den() -> void:
 	geo.limb(dt, dt + Vector3(0.3, 6.0, 0.2), 0.32, 0.12, 7, Color(0.32, 0.27, 0.22))
 	geo.limb(dt + Vector3(0.2, 3.8, 0.1), dt + Vector3(1.8, 5.5, 0.6), 0.12, 0.04, 5, Color(0.32, 0.27, 0.22))
 	geo.limb(dt + Vector3(0.25, 4.6, 0.1), dt + Vector3(-1.2, 6.4, -0.8), 0.1, 0.03, 5, Color(0.32, 0.27, 0.22))
-	_cyl(body, dt, 0.32, 6.0)
+	_cyl(tree_body(), dt, 0.32, 6.0)
 	world.add_blocker(dt.x, dt.z, 1.0)
 	_commit(geo, "WolfDen")
 	stats["areas"] += 1
@@ -713,7 +727,7 @@ func _ogre() -> void:
 			var y := h * rng.randf_range(0.45, 0.8)
 			var d := Vector3(cos(rng.randf() * TAU), 0.6, sin(rng.randf() * TAU)) * rng.randf_range(1.4, 2.4)
 			geo.limb(p + Vector3(0, y, 0), p + Vector3(0, y, 0) + d, 0.12, 0.03, 5, bark)
-		_cyl(body, p, 0.35, h)
+		_cyl(tree_body(), p, 0.35, h)
 		world.add_blocker(p.x, p.z, 1.2)
 	# big tree-stump "throne"
 	var st := gp(c.x - 6.0, c.z - 22.0)
@@ -1127,7 +1141,7 @@ func _marsh(w: Dictionary) -> void:
 		cap.height = h
 		cs.shape = cap
 		cs.transform = Transform3D(Basis(Quaternion(Vector3.UP, (top - p).normalized())), (p + top) * 0.5)
-		body.add_child(cs)
+		tree_body().add_child(cs)
 		world.add_blocker(x, z, 1.4)
 	# fallen rotting logs across the mud, mossy stumps, a sunken cart wheel
 	for k in 4:
@@ -1137,7 +1151,7 @@ func _marsh(w: Dictionary) -> void:
 		var dir := Vector3(cos(a + 1.3), 0, sin(a + 1.3)) * rng.randf_range(2.0, 3.5)
 		geo.limb(p - dir, p + dir + Vector3(0, 0.3, 0), 0.38, 0.3, 8, bark.darkened(0.15), Color(0.32, 0.38, 0.2))
 		var lb := Basis.looking_at(dir.normalized(), Vector3.UP)
-		_box(body, Transform3D(lb, p + Vector3(0, 0.1, 0)), Vector3(0.6, 0.6, dir.length() * 2.0))
+		_box(tree_body(), Transform3D(lb, p + Vector3(0, 0.1, 0)), Vector3(0.6, 0.6, dir.length() * 2.0))
 	for k in 6:
 		var a := rng.randf() * TAU
 		var d := rng.randf_range(3.0, r)
@@ -1149,7 +1163,7 @@ func _marsh(w: Dictionary) -> void:
 	# low ground mist
 	var mist := GPUParticles3D.new()
 	mist.name = "MarshMist"
-	mist.amount = 46
+	mist.amount = 26
 	mist.lifetime = 14.0
 	mist.preprocess = 14.0
 	mist.position = Vector3(c.x, lvl + 0.6, c.z)
@@ -1172,25 +1186,19 @@ func _marsh(w: Dictionary) -> void:
 	pm.color_ramp = gt
 	mist.process_material = pm
 	var q := QuadMesh.new()
-	q.size = Vector2(9, 3.5)
-	q.material = WorldAtmosphere.soft_particle_mat(Color(0.78, 0.82, 0.74), false)
+	q.size = Vector2(6, 2.4)
+	# own material: fades out within a few metres of the camera so standing in
+	# the marsh never fills the screen with overlapping transparent cards
+	var mm := WorldAtmosphere.soft_particle_mat(Color(0.78, 0.82, 0.74), false).duplicate() as StandardMaterial3D
+	mm.distance_fade_mode = BaseMaterial3D.DISTANCE_FADE_PIXEL_ALPHA
+	mm.distance_fade_min_distance = 2.0
+	mm.distance_fade_max_distance = 9.0
+	q.material = mm
 	mist.draw_pass_1 = q
 	mist.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	mist.set_meta("base_amount", 46)
+	mist.set_meta("base_amount", 26)
 	add_child(mist)
 	world.atmosphere.particles.append(mist)
-	# darker, greener haze inside the marsh (volumetric fog; high quality only)
-	var fv := FogVolume.new()
-	fv.name = "MarshFog"
-	fv.size = Vector3(r * 2.2, 8.0, r * 2.2)
-	fv.position = Vector3(c.x, lvl + 2.0, c.z)
-	var fmat := FogMaterial.new()
-	fmat.density = 0.02
-	fmat.albedo = Color(0.36, 0.40, 0.31)
-	fmat.height_falloff = 0.4
-	fmat.edge_fade = 0.6
-	fv.material = fmat
-	add_child(fv)
 	# ambience (safe no-op if the audio agent has no such loop)
 	var sn := _sound_node(Vector3(c.x, lvl, c.z))
 	Audio.create_loop(&"marsh_loop", sn, 18.0)

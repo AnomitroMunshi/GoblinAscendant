@@ -6,7 +6,7 @@ uniform vec3 beam_color : source_color = vec3(1.0, 0.92, 0.70);
 uniform float strength = 0.08;
 
 void fragment() {
-	float across = sin(UV.x * PI);
+	float across = max(sin(clamp(UV.x, 0.0, 1.0) * PI), 0.0);
 	across = pow(across, 2.5);
 	float along = smoothstep(0.0, 0.35, UV.y) * smoothstep(1.0, 0.75, UV.y);
 	float shimmer = 0.85 + 0.15 * sin(TIME * 0.7 + UV.x * 6.0);

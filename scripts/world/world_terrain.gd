@@ -103,6 +103,7 @@ static func _noise(seed_v: int, freq: float, octaves: int) -> FastNoiseLite:
 
 # =================================================================== build
 func build() -> void:
+	_setup_clearings()
 	_build_river_line()
 	_rasterize_distances()
 	_setup_flats()
@@ -526,16 +527,47 @@ func _compute_normals() -> void:
 
 
 ## Forest density 0..1 used for terrain tint and tree placement.
+## Forest by default: thick stands (1.0) and slightly thinner groves (~0.75),
+## old growth around the Howling Woods; zero inside story clearings.
 func forest_density(x: float, z: float) -> float:
 	var ww := WorldLayout.WOLF_WOODS
 	var dw := Vector2(x - ww.x, z - ww.z).length()
-	var f := 1.0 - smoothstep(45.0, 105.0, dw)
-	var clump := smoothstep(0.02, 0.32, _nf.get_noise_2d(x, z)) * 0.85
-	f = maxf(f, clump)
-	var dd := pow(pow(absf(x), 6.0) + pow(absf(z), 6.0), 1.0 / 6.0)
-	f = maxf(f, smoothstep(165.0, 210.0, dd) * 0.9)
-	var g := WorldLayout.START_GLADE
-	f *= smoothstep(38.0, 62.0, Vector2(x - g.x, z - g.z).length())
+	var f := 0.74 + 0.26 * smoothstep(-0.25, 0.3, _nf.get_noise_2d(x, z))
+	f = maxf(f, 1.0 - smoothstep(60.0, 110.0, dw))
+	return f * clearing_factor(x, z)
+
+
+## Story clearings: [x, z, radius]. Shared by terrain colouring and vegetation.
+var clearings: Array = []
+
+
+func _setup_clearings() -> void:
+	var L := WorldLayout
+	var defs := [
+		[L.START_GLADE, 21.0], [L.PLAYER_START, 12.0], [L.RESCUE_SITE, 21.0], [L.RUINS, 20.0],
+		[L.RUINS_SHRINE, 11.0], [L.OVERLOOK, 17.0], [L.ADVENTURER_CAMP, 25.0], [L.RAIDER_OUTPOST, 27.0],
+		[L.OGRE_CLEARING, L.OGRE_ARENA_RADIUS + 6.0], [L.CAVE_ENTRANCE, 15.0], [L.ALPHA_WOLF_DEN, 14.0],
+		[L.WATERFALL_POOL, 21.0], [L.BRIDGE, 13.0], [L.WOLF_WOODS, 9.0],
+	]
+	for f: Vector3 in L.FORDS:
+		defs.append([f, 11.0])
+	for k: StringName in L.CHECKPOINTS:
+		defs.append([L.CHECKPOINTS[k], 6.0])
+	for w: Dictionary in L.STILL_WATERS:
+		defs.append([w["pos"], float(w["radius"]) * 1.25 + (4.0 if w["kind"] == &"marsh" else 3.0)])
+	clearings.clear()
+	for d: Array in defs:
+		var p: Vector3 = d[0]
+		clearings.append(Vector3(p.x, p.z, d[1]))
+
+
+## 0 inside a clearing, ramping to 1 over 7 m at its edge (forest edge).
+func clearing_factor(x: float, z: float) -> float:
+	var f := 1.0
+	for c: Vector3 in clearings:
+		var d := Vector2(x - c.x, z - c.y).length() - c.z
+		if d < 7.0:
+			f = minf(f, smoothstep(-1.0, 7.0, d))
 	return f
 
 
@@ -585,7 +617,7 @@ func _compute_attrs() -> void:
 			mud[idx] = wet
 			var g := L.START_GLADE
 			var gd := Vector2(x - g.x, z - g.z).length()
-			var meadow := 1.0 - smoothstep(18.0, 46.0, gd)
+			var meadow := 1.0 - smoothstep(12.0, 24.0, gd)
 			var forest := maxf(forest_density(x, z), marsh)
 			attrs[idx] = Color(dirt, sand, meadow, forest)
 

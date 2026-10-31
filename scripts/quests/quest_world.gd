@@ -140,6 +140,12 @@ func _build_rescue_zone() -> void:
 	z.radius = WorldLayout.RESCUE_SITE_RADIUS
 	add_child(z)
 	z.global_position = _ground(WorldLayout.RESCUE_SITE)
+	var edge := TriggerZone.new()
+	edge.name = "GladeEdgeZone"
+	edge.zone_id = &"glade_edge"
+	edge.radius = 4.0
+	add_child(edge)
+	edge.global_position = _ground(QuestData.GLADE_EDGE_POS)
 
 
 func _build_nib() -> void:

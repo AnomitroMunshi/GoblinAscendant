@@ -4,16 +4,14 @@ Living file, updated by the lead as work lands. Newest log entries on top.
 Status keys: ✅ done & verified · 🟡 partial / unverified · ⏸ paused · ⬜ not started
 
 ## Current focus (2026-10-31)
-Chapter 1 narrative draft and implementation handoff: [A Fire of Our Own](STORY_CHAPTER_1.md). Includes scenes, dialogue, environmental clues and Claude's implementation checklist. Story additions are not implemented. The draft proposes hearth completion with evolution foreshadowed; current quest code still requires level 5 and Hobgoblin evolution until that change is integrated.
-User's added journey requirements: rabbit alert/flee encounter, deer crossing, and an adventurer search party with a working cover/avoidance route before Nib's rescue. Detailed in the story draft; implementation pending. These specific wildlife scenes extend the earlier scope cut; the larger wildlife library remains deferred. Preserve neutral adventurer faction rules and handle discovery without automatic lethal combat.
-Further user direction: two wolves killed by the adventurers can be searched for loot; a discarded rough sword can also be taken. Story specifies two one-time fang searches and an optional Battered Short Sword with real equip/stow, sword moveset and save support. Implementation pending; no player kill credit for scavenged carcasses, and the starting knife remains owned.
-
-**WORLD FIRST (user, 2026-10-31):** only the World agent is running. Choreography and Character Art are paused until the world is done and reviewed.
-Earlier plan, still the overall goal: **finish Chapter 1** (user request): World, Combat & Enemy AI, UI & Audio, plus
-the new Combat Choreography agent (data-driven weapon movesets, previews, enemy motion spec).
-Integration & QA runs after them; then the lead flips the default build to the full game.
-- Default launch is still the movement playground. Run the full game with `godot --path . -- --full`.
-- Known integration blocker at resume: `scripts/world/world_terrain.gd` parse error (World agent fixing).
+**Chapter 1 first draft is playable and pushed.** The full game is the default launch; `-- --playground` gives the movement test level.
+- Verified: all 7 headless suites green in parallel (`tools/run_tests.sh`): player 79, combat 93, world 42, audio, progression 137, ui_hud 45, qa_chapter1 200. Windowed default-launch walk of 11 areas at 85–151 fps on high (RX 6600 XT, 1600×900).
+- Next candidates (user to pick):
+  - Story-draft scenes in `STORY_CHAPTER_1.md`: Battered Short Sword pickup and equip, wolf carcasses, rabbit/deer moments, adventurer search party, hearth ending.
+  - Realistic character remodel (Character Art kit paused in `scripts/characters/`).
+  - Enemy choreography spec.
+  - Equipment/inventory system.
+  - Human playtest of combat feel.
 
 ## Status by area
 | Area | Status | Notes |
@@ -172,6 +170,12 @@ Revised Chapter 1 weapon path: rough knife → optional ordinary weapon finds �
 
 ## Progress log
 ### 2026-10-31
+- Lead: made the full game the default launch (`PLAYER_ONLY = false`; playground via `-- --playground`). Added README. World agent fixed the stray straight conifer branch, replaced plank-like roots with flared trunk bases, and clamped a NaN sunbeam glow. Final parallel verification green; committed and pushed to `origin/master`.
+- Dense forest pass DONE (World agent).
+  - Valley is forest by default (density 0.74–1.0), with small clearings at story areas only and trails under canopy. About 5,000 overstory trees plus saplings, bushes, ferns, logs and boulders. Trunks on `TREES`, minimum spacing 2.8 m.
+  - Shader-based LOD; ≥ 86 fps in every area in `full_walk` (marsh 127; the marsh FogVolume was removed).
+  - Lead review: forest feel achieved. Two defects sent back: a stray long branch line, and plank-like root flares.
+- Lead: first objective changed to "Walk to the north edge of the glade" (`glade_edge` zone ~28 m from spawn). The old step completed instantly because the spawn point is inside the glade zone. Progression 137/137, QA 200/200 (asserts spawning doesn't complete it).
 - Integration & QA pass (full game, `-- --full`). Report: `docs/QA_REPORT.md`.
   - New `tests/qa_chapter1.tscn` drives the real chain to Hobgoblin evolution (196/196, headless and windowed); it was picked up by `tools/run_tests.sh`. It reached level 5 with real content, no XP top-up. New `tests/qa_title_flow.tscn` (windowed) covers title → New Game → save → title → Continue (11/11).
   - Fixed: booting to the title screen autosaved the fresh background world over the real save (`save_manager.gd`); ObjectDB leaks at exit (Audio now stops its players on teardown, full game 0 leaks); added the `marsh_loop` ambience; `Palette.vertex_color_mat()` uses sRGB vertex colours; `full_walk` now backs up the real save.

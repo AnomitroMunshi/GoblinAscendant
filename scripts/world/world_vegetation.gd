@@ -15,13 +15,15 @@ var terrain: WorldTerrain
 var rng := RandomNumberGenerator.new()
 var _clear: Array = []          # [pos, r] areas kept free of trees
 var _bins: Dictionary = {}      # "kind|cx|cz" -> {xf, col, cu}
-var _trunk_body: StaticBody3D
+var _trunk_body: StaticBody3D   # Layers.TREES: trunks, logs, stumps (camera ignores)
+var _rock_body: StaticBody3D    # Layers.WORLD: boulders
 var _trunk_shapes: Dictionary = {}
 var _rock_shapes: Dictionary = {}
 var _density_nodes: Array = []  # [MultiMeshInstance3D, total]
-var stats := {"trees": 0, "giant_trees": 0, "bushes": 0, "ferns": 0, "logs": 0, "grass": 0, "flowers": 0,
+var stats := {"trees": 0, "saplings": 0, "giant_trees": 0, "bushes": 0, "ferns": 0, "logs": 0, "grass": 0, "flowers": 0,
 	"boulders": 0, "outer_trees": 0, "multimeshes": 0, "trunk_shapes": 0}
 
+var far_bins: Array = []
 var tree_specs: Array = []      # per species: [near Spec, far Spec]
 var bush_meshes: Array = []
 var fern_meshes: Array = []
@@ -46,9 +48,14 @@ func build(w: Node3D) -> void:
 	mat_rock = WorldTextures.rock_mat("rock_mossy", 0.7, 0.32, 0.35)
 	_trunk_body = StaticBody3D.new()
 	_trunk_body.name = "TrunkBodies"
-	_trunk_body.collision_layer = Layers.WORLD
+	_trunk_body.collision_layer = Layers.TREES
 	_trunk_body.collision_mask = 0
 	add_child(_trunk_body)
+	_rock_body = StaticBody3D.new()
+	_rock_body.name = "RockBodies"
+	_rock_body.collision_layer = Layers.WORLD
+	_rock_body.collision_mask = 0
+	add_child(_rock_body)
 	_setup_clearings()
 	_make_meshes()
 	_place_giants()
@@ -68,20 +75,9 @@ func build(w: Node3D) -> void:
 
 # =================================================================== rules
 func _setup_clearings() -> void:
-	var L := WorldLayout
-	_clear = [
-		[L.START_GLADE, 30.0], [L.PLAYER_START, 22.0], [L.RESCUE_SITE, 22.0], [L.RUINS, 30.0],
-		[L.RUINS_SHRINE, 10.0], [L.OVERLOOK, 18.0], [L.ADVENTURER_CAMP, 26.0], [L.RAIDER_OUTPOST, 28.0],
-		[L.OGRE_CLEARING, L.OGRE_ARENA_RADIUS + 6.0], [L.CAVE_ENTRANCE, 16.0], [L.ALPHA_WOLF_DEN, 14.0],
-		[L.WATERFALL_POOL, 20.0], [L.BRIDGE, 14.0],
-	]
-	for f: Vector3 in L.FORDS:
-		_clear.append([f, 12.0])
-	for k: StringName in L.CHECKPOINTS:
-		_clear.append([L.CHECKPOINTS[k], 6.0])
-	for w: Dictionary in L.STILL_WATERS:
-		# the marsh gets its own dead trees from the landmarks module
-		_clear.append([w["pos"], float(w["radius"]) + (6.0 if w["kind"] == &"marsh" else 3.0)])
+	_clear.clear()
+	for c: Vector3 in terrain.clearings:
+		_clear.append([Vector3(c.x, 0, c.y), c.z])
 
 
 func _in_clearing(x: float, z: float, scale_r: float = 1.0) -> bool:
@@ -119,7 +115,7 @@ func _chunk_key(kind: String, x: float, z: float) -> String:
 	var c := CHUNK
 	if kind.begins_with("outer"):
 		c = 256.0
-	elif kind.begins_with("tree") or kind.begins_with("rock") or kind.begins_with("log") or kind.begins_with("stump"):
+	elif kind.begins_with("rock") or kind.begins_with("log") or kind.begins_with("stump"):
 		c = 128.0
 	return "%s|%d|%d" % [kind, floori(x / c), floori(z / c)]
 
@@ -261,29 +257,61 @@ func _pick_species(x: float, z: float, y: float) -> int:
 	return WorldFlora.OAK_A if b < 0.35 else (WorldFlora.OAK_B if b < 0.6 else (WorldFlora.BEECH if b < 0.85 else WorldFlora.BIRCH))
 
 
+## Overstory on a jittered grid: cell 5.0 m, jitter +-1.1 m, so trunk centres
+## are always >= 2.8 m apart (>= ~1.6 m clear gap for walking actors).
+## Trails stay clear (trunk centre >= 2.9 m from the trail centre line).
 func _place_trees() -> void:
 	var spacing := 5.0
+	var jit := 1.1
 	var n := int(470.0 / spacing)
 	var ww := WorldLayout.WOLF_WOODS
 	for gj in n:
 		for gi in n:
-			var x := -235.0 + gi * spacing + rng.randf_range(-2.2, 2.2)
-			var z := -235.0 + gj * spacing + rng.randf_range(-2.2, 2.2)
+			var x := -235.0 + gi * spacing + rng.randf_range(-jit, jit)
+			var z := -235.0 + gj * spacing + rng.randf_range(-jit, jit)
 			var roll := rng.randf()
 			var dens := terrain.forest_density(x, z)
-			if roll > dens * 0.82 + 0.03:
+			if roll > dens * 0.9:
 				continue
 			if absf(x) > 232.0 or absf(z) > 232.0:
 				continue
-			if _in_clearing(x, z) or world.is_blocked(x, z, 2.5):
+			if _in_clearing(x, z) or world.is_blocked(x, z, 1.4):
 				continue
-			if not _ground_ok(x, z, 5.0, 5.0, 0.8):
+			if not _ground_ok(x, z, 2.9, 3.5, 0.78):
 				continue
 			var y := terrain.height_at(x, z)
-			var in_woods := Vector2(x - ww.x, z - ww.z).length() < 85.0
+			var in_woods := Vector2(x - ww.x, z - ww.z).length() < 90.0
 			var sp := _pick_species(x, z, y)
-			var s := rng.randf_range(0.8, 1.2) * (1.12 if in_woods else 1.0)
-			_add_tree(sp, x, y, z, s, _tint(0.2 if in_woods else 0.0))
+			var s := rng.randf_range(1.05, 1.75) * (1.1 if in_woods else 1.0)
+			if sp == WorldFlora.BIRCH:
+				s *= 0.85
+			_add_tree(sp, x, y, z, s, _tint(0.22 if in_woods else 0.05))
+	_place_saplings()
+
+
+## Mid layer: young trees between the trunks (no collision, thin stems).
+func _place_saplings() -> void:
+	var spacing := 6.5
+	var n := int(470.0 / spacing)
+	for gj in n:
+		for gi in n:
+			var x := -235.0 + (gi + 0.5) * spacing + rng.randf_range(-1.5, 1.5)
+			var z := -235.0 + (gj + 0.5) * spacing + rng.randf_range(-1.5, 1.5)
+			var dens := terrain.forest_density(x, z)
+			if rng.randf() > dens * 0.55:
+				continue
+			if _in_clearing(x, z, 0.9) or world.is_blocked(x, z, 0.4):
+				continue
+			if not _ground_ok(x, z, 2.2, 2.0, 0.8):
+				continue
+			var y := terrain.height_at(x, z)
+			var sp := _pick_species(x, z, y)
+			if sp == WorldFlora.SNAG:
+				sp = WorldFlora.FIR
+			var s := rng.randf_range(0.35, 0.65)
+			var b := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s * rng.randf_range(0.9, 1.15), s))
+			_bin("sap%d" % sp, x, z, Transform3D(b, Vector3(x, y - 0.05, z)), _tint(0.08))
+			stats["saplings"] += 1
 
 
 func _add_tree(sp: int, x: float, y: float, z: float, s: float, tint: Color) -> void:
@@ -292,7 +320,7 @@ func _add_tree(sp: int, x: float, y: float, z: float, s: float, tint: Color) -> 
 	_bin("tree%d" % sp, x, z, xf, tint)
 	var near: WorldFlora.Spec = tree_specs[sp][0]
 	_trunk(x, y, z, near.trunk_r * s * 1.1, near.trunk_h * s)
-	world.add_blocker(x, z, 1.4 * s)
+	world.add_blocker(x, z, 1.0)
 	stats["trees"] += 1
 
 
@@ -351,7 +379,7 @@ func _place_giants() -> void:
 func _place_boulders() -> void:
 	var count := 0
 	var tries := 0
-	while count < 240 and tries < 6000:
+	while count < 300 and tries < 8000:
 		tries += 1
 		var x := rng.randf_range(-232.0, 232.0)
 		var z := rng.randf_range(-232.0, 232.0)
@@ -386,26 +414,29 @@ func _rock_collider(kind: int, xf: Transform3D) -> void:
 	var cs := CollisionShape3D.new()
 	cs.shape = _rock_shapes[kind]
 	cs.transform = xf
-	_trunk_body.add_child(cs)
+	_rock_body.add_child(cs)
 
 
 ## Fallen logs (with collision) and stumps in forested areas.
 func _place_logs() -> void:
 	var count := 0
 	var tries := 0
-	while count < 90 and tries < 4000:
+	while count < 220 and tries < 9000:
 		tries += 1
 		var x := rng.randf_range(-230.0, 230.0)
 		var z := rng.randf_range(-230.0, 230.0)
 		var f := terrain.forest_density(x, z)
 		if rng.randf() > f * 0.9:
 			continue
-		if _in_clearing(x, z, 0.9) or world.is_blocked(x, z, 2.5):
+		if _in_clearing(x, z, 0.9) or world.is_blocked(x, z, 1.2):
 			continue
-		if not _ground_ok(x, z, 4.0, 3.0, 0.88):
+		if not _ground_ok(x, z, 4.5, 3.0, 0.88):
 			continue
 		var y := terrain.height_at(x, z)
 		var yaw := rng.randf() * TAU
+		# logs lie roughly along the nearest trail so they never block it
+		if terrain.path_distance(x, z) < 9.0:
+			yaw = rng.randf_range(-0.3, 0.3) + atan2(x, z)
 		if rng.randf() < 0.55:
 			var k := rng.randi() % log_meshes.size()
 			var xf := Transform3D(Basis(Vector3.UP, yaw), Vector3(x, y - 0.15, z))
@@ -428,23 +459,23 @@ func _place_logs() -> void:
 
 
 func _place_undergrowth() -> void:
-	var spacing := 3.4
+	var spacing := 2.8
 	var n := int(470.0 / spacing)
 	for gj in n:
 		for gi in n:
-			var x := -235.0 + gi * spacing + rng.randf_range(-1.5, 1.5)
-			var z := -235.0 + gj * spacing + rng.randf_range(-1.5, 1.5)
+			var x := -235.0 + gi * spacing + rng.randf_range(-1.3, 1.3)
+			var z := -235.0 + gj * spacing + rng.randf_range(-1.3, 1.3)
 			var f := terrain.forest_density(x, z)
-			if rng.randf() > 0.04 + f * 0.42:
+			if rng.randf() > 0.03 + f * 0.5:
 				continue
 			if absf(x) > 234.0 or absf(z) > 234.0:
 				continue
 			if _in_clearing(x, z, 0.75) or world.is_blocked(x, z, 0.5):
 				continue
-			if not _ground_ok(x, z, 2.4, 1.5, 0.75):
+			if not _ground_ok(x, z, 1.9, 1.5, 0.75):
 				continue
 			var y := terrain.height_at(x, z)
-			var fern := f > 0.4 and rng.randf() < 0.6
+			var fern := f > 0.4 and rng.randf() < 0.65
 			var s := rng.randf_range(0.7, 1.4)
 			var b := Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s * rng.randf_range(0.8, 1.1), s))
 			if fern:
@@ -463,7 +494,7 @@ func _place_grass() -> void:
 			var z0 := -256.0 + cj * CHUNK
 			var cc := Vector2(x0 + 32.0, z0 + 32.0)
 			var glade := 1.0 - smoothstep(30.0, 90.0, cc.distance_to(Vector2(g.x, g.z)))
-			var tries := int(1700 + glade * 2600)
+			var tries := int(1500 + glade * 2600)
 			for t in tries:
 				var x := x0 + rng.randf() * CHUNK
 				var z := z0 + rng.randf() * CHUNK
@@ -473,7 +504,7 @@ func _place_grass() -> void:
 				var at := terrain.attrs[k]
 				if at.r > 0.3 or at.g > 0.25 or terrain.normals[k].y < 0.8 or terrain.mud[k] > 0.5:
 					continue
-				if rng.randf() < at.a * 0.8:
+				if rng.randf() < at.a * 0.93:
 					continue
 				if terrain.river_d[k] < terrain.river_half_width(terrain.river_k[k]) + 0.8:
 					continue
@@ -546,13 +577,18 @@ func _flush_bins() -> void:
 			order[j] = tmp
 		if kind.begins_with("tree"):
 			var sp: Array = tree_specs[int(kind.substr(4))]
-			_mm(key + "_near", (sp[0] as WorldFlora.Spec).mesh, xfs, cols, null, order, null, true, 0.0, 150.0)
-			_mm(key + "_far", (sp[1] as WorldFlora.Spec).mesh, xfs, cols, null, order, null, false, 150.0, 950.0)
+			# near detail: 64 m chunks, node culled beyond split + chunk radius
+			_mm(key + "_near", (sp[0] as WorldFlora.Spec).mesh, xfs, cols, null, order, null, true, 0.0, 100.0)
+			far_bins.append([kind, xfs, cols])
+		elif kind.begins_with("sap"):
+			# mid layer: near-detail mesh only (it fades out at the LOD split), thinned on low
+			var ssp: Array = tree_specs[int(kind.substr(3))]
+			_density_nodes.append([_mm(key, (ssp[0] as WorldFlora.Spec).mesh, xfs, cols, null, order, null, true, 0.0, 100.0), xfs.size()])
 		elif kind.begins_with("outer"):
 			var sp2: Array = tree_specs[int(kind.substr(5))]
 			_mm(key, (sp2[1] as WorldFlora.Spec).mesh, xfs, cols, null, order, null, false, 0.0, 1100.0)
 		elif kind.begins_with("bush"):
-			_density_nodes.append([_mm(key, bush_meshes[int(kind.substr(4))], xfs, cols, null, order, null, true, 0.0, 110.0), xfs.size()])
+			_density_nodes.append([_mm(key, bush_meshes[int(kind.substr(4))], xfs, cols, null, order, null, false, 0.0, 90.0), xfs.size()])
 		elif kind.begins_with("fern"):
 			_density_nodes.append([_mm(key, fern_meshes[int(kind.substr(4))], xfs, cols, null, order, null, false, 0.0, 80.0), xfs.size()])
 		elif kind.begins_with("log"):
@@ -566,6 +602,25 @@ func _flush_bins() -> void:
 		elif kind == "flower":
 			_density_nodes.append([_mm(key, flower_mesh, xfs, cols, cus, order, mat_flower, false, 0.0, 110.0), xfs.size()])
 	_bins.clear()
+	# far LOD merged into 128 m chunks (fewer draw calls); shadows on (cascades limit them)
+	var far: Dictionary = {}
+	for e: Array in far_bins:
+		var xa: Array = e[1]
+		var ca: PackedColorArray = e[2]
+		for i in xa.size():
+			var t: Transform3D = xa[i]
+			var k2 := "%s|%d|%d" % [e[0], floori(t.origin.x / 128.0), floori(t.origin.z / 128.0)]
+			if not far.has(k2):
+				far[k2] = [[], PackedColorArray()]
+			far[k2][0].append(t)
+			far[k2][1].append(ca[i])
+	var fkeys := far.keys()
+	fkeys.sort()
+	for k2: String in fkeys:
+		var sp2: Array = tree_specs[int(k2.split("|")[0].substr(4))]
+		var fx: Array = far[k2][0]
+		_mm(k2 + "_far", (sp2[1] as WorldFlora.Spec).mesh, fx, far[k2][1], null, range(fx.size()), null, false, 0.0, 950.0)
+	far_bins.clear()
 
 
 func _mm(n: String, mesh: Mesh, xfs: Array, cols: PackedColorArray, cus: Variant, order: Array, mat: Material, shadows: bool, vis_begin: float, vis_end: float) -> MultiMeshInstance3D:

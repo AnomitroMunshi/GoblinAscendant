@@ -43,6 +43,10 @@ static func soft_particle_mat(col: Color, additive: bool, energy: float = 0.0) -
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	if additive:
 		m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		# glowing motes must never bloom into a blob right in front of the camera
+		m.distance_fade_mode = BaseMaterial3D.DISTANCE_FADE_PIXEL_ALPHA
+		m.distance_fade_min_distance = 1.5
+		m.distance_fade_max_distance = 5.0
 	m.albedo_color = col
 	var gt := GradientTexture2D.new()
 	var g := Gradient.new()

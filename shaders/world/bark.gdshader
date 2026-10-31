@@ -9,6 +9,8 @@ uniform float tex_scale = 0.6;
 uniform float moss_amount = 0.15;
 uniform float sway_strength = 1.0;
 uniform float wind_speed = 1.1;
+uniform vec2 lod_band = vec2(0.0, 100000.0);  // draw instances whose distance to view_pos is in [x, y)
+uniform vec3 view_pos = vec3(0.0);             // gameplay camera (set by WorldRoot each frame; shadow-pass safe)
 
 varying vec3 wpos;
 varying vec3 wnrm;
@@ -20,6 +22,10 @@ void vertex() {
 	float t = TIME * wind_speed + ip.x * 0.045 + ip.z * 0.06;
 	float gust = 0.65 + 0.35 * sin(TIME * 0.31 + ip.x * 0.01);
 	VERTEX += vec3(sin(t), 0.0, cos(t * 0.83 + 1.3)) * 0.12 * gust * COLOR.a * sway_strength;
+	float lod_d = length(MODEL_MATRIX[3].xyz - view_pos);
+	if (lod_d < lod_band.x || lod_d >= lod_band.y) {
+		VERTEX = vec3(0.0);  // collapse: this instance is drawn by another LOD
+	}
 }
 
 void fragment() {

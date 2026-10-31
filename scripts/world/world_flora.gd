@@ -60,13 +60,18 @@ static func _trunk(geo: WorldGeo, mr: RandomNumberGenerator, h: float, r0: float
 	return pts
 
 
+## Flared trunk base (a widened bottom ring sunk into the soil) plus short,
+## low root bulges that taper and dive into the ground.
 static func _roots(geo: WorldGeo, mr: RandomNumberGenerator, r0: float, n: int, sides: int, tint: float) -> void:
+	var col := _bark_col(0.0, tint)
+	# top radius tucks just inside the trunk so there is no visible step
+	geo.cylinder(Transform3D(Basis(), Vector3(0, -0.35, 0)), r0 * 1.6, r0 * 0.94, r0 * 2.2 + 0.35, maxi(sides * 2, 10), col, col, false, 0.0, 0.0, 0.0, 0, 1.0)
 	for k in n:
 		var a := TAU * k / n + mr.randf_range(-0.3, 0.3)
 		var d := Vector3(cos(a), 0, sin(a))
-		var a0 := d * r0 * 0.5 + Vector3(0, r0 * 1.6, 0)
-		var a1 := d * r0 * mr.randf_range(2.2, 3.0) + Vector3(0, -0.15, 0)
-		geo.limb(a0, a1, r0 * 0.55, r0 * 0.12, sides, _bark_col(0.0, tint * 0.9))
+		var a0 := d * r0 * 0.8 + Vector3(0, r0 * 0.55, 0)
+		var a1 := d * r0 * mr.randf_range(1.7, 2.1) + Vector3(0, -0.3, 0)
+		geo.limb(a0, a1, r0 * 0.38, r0 * 0.1, sides, col, col)
 
 
 ## A clump of 3-5 crossed leaf cards around c, shaded outward from `centre`.
@@ -123,7 +128,7 @@ static func _broadleaf(mr: RandomNumberGenerator, species: int, near: bool) -> S
 		var ang := TAU * b / nb * 1.618 + mr.randf_range(-0.4, 0.4)
 		var up := mr.randf_range(0.35, 0.8) if not birch else mr.randf_range(0.1, 0.4)
 		var dir := Vector3(cos(ang), up, sin(ang)).normalized()
-		var L := crown_r * mr.randf_range(0.7, 1.0) * (1.0 - t * 0.35)
+		var L := minf(crown_r * mr.randf_range(0.7, 1.0) * (1.0 - t * 0.35), crown_r)
 		var tip := base + dir * L
 		if birch:
 			tip.y -= L * 0.25
@@ -141,7 +146,7 @@ static func _broadleaf(mr: RandomNumberGenerator, species: int, near: bool) -> S
 	ends.append(pts[pts.size() - 1])
 	# foliage: clusters at branch ends + fill inside the crown ellipsoid
 	var csize := (1.8 if near else 2.9) * (0.8 if birch else 1.0)
-	var ncard := 5 if near else 3
+	var ncard := 4 if near else 3
 	for e: Vector3 in ends:
 		_cluster(leaf, mr, e, centre, csize, ncard, cell, tint, 0.35 if birch else 0.0)
 	var fill := (30 if not birch else 18) if near else 12
@@ -153,8 +158,9 @@ static func _broadleaf(mr: RandomNumberGenerator, species: int, near: bool) -> S
 		_cluster(leaf, mr, c, centre, csize, ncard, cell, tint, 0.35 if birch else 0.0)
 	var spec := Spec.new()
 	spec.mesh = ArrayMesh.new()
-	bark.add_to(spec.mesh, WorldTextures.bark_mat("bark_oak", 0.7 if not birch else 1.1, 0.25 if not birch else 0.0))
-	leaf.add_to(spec.mesh, WorldTextures.leaf_mat())
+	var lod := WorldTextures.LOD_NEAR if near else WorldTextures.LOD_FAR
+	bark.add_to(spec.mesh, WorldTextures.bark_mat("bark_oak", 0.7 if not birch else 1.1, 0.25 if not birch else 0.0, lod))
+	leaf.add_to(spec.mesh, WorldTextures.leaf_mat("leaves", 1.0, lod))
 	spec.trunk_r = r0
 	spec.trunk_h = trunk_h * 0.7
 	return spec
@@ -175,7 +181,7 @@ static func _conifer(mr: RandomNumberGenerator, fir: bool, near: bool) -> Spec:
 	var pts := _trunk(bark, mr, h, r0, 0.05, 5 if near else 3, sides, 0.12, NEUTRAL, 0.25)
 	if near:
 		_roots(bark, mr, r0, 4, 4, NEUTRAL)
-	var start := 0.35 if not fir else 0.12
+	var start := 0.45 if not fir else 0.3
 	var whorls := (11 if not fir else 14) if near else (5 if not fir else 6)
 	var per := (6 if not fir else 7) if near else 5
 	var base_len := 3.0 if not fir else 3.4
@@ -192,7 +198,12 @@ static func _conifer(mr: RandomNumberGenerator, fir: bool, near: bool) -> Spec:
 			var base := _along(pts, t)
 			var tip := base + dir * L
 			if near:
-				bark.limb(base, tip, 0.06 * (1.0 - t) + 0.02, 0.01, 3, _bark_col(0.4), _bark_col(0.9), 0.4, 0.9)
+				# bare wood only for the inner part of the branch, drooping; the
+				# needle sprays carry the rest (avoids long straight sticks)
+				var bmid := base + dir * L * 0.3 + Vector3(0, -0.05, 0)
+				var bend := base + dir * L * 0.55 + Vector3(0, -0.2 - droop * 0.4, 0)
+				bark.limb(base, bmid, 0.05 * (1.0 - t) + 0.025, 0.02, 3, _bark_col(0.4), _bark_col(0.6), 0.4, 0.6)
+				bark.limb(bmid, bend, 0.02, 0.006, 3, _bark_col(0.6), _bark_col(0.9), 0.6, 0.9)
 			# needle sprays: card along the branch (texture stem runs along "u"),
 			# a second one crossed for volume
 			var side := dir.cross(Vector3.UP).normalized()
@@ -214,8 +225,9 @@ static func _conifer(mr: RandomNumberGenerator, fir: bool, near: bool) -> Spec:
 		leaf.card(top + Vector3(0, -0.6, 0), r * 0.5, Vector3.UP * 1.2, Vector3.UP, Color(tint, 1.0), WorldTextures.CELL_NEEDLE)
 	var spec := Spec.new()
 	spec.mesh = ArrayMesh.new()
-	bark.add_to(spec.mesh, WorldTextures.bark_mat("bark_fir", 0.8, 0.1))
-	leaf.add_to(spec.mesh, WorldTextures.leaf_mat())
+	var lod := WorldTextures.LOD_NEAR if near else WorldTextures.LOD_FAR
+	bark.add_to(spec.mesh, WorldTextures.bark_mat("bark_fir", 0.8, 0.1, lod))
+	leaf.add_to(spec.mesh, WorldTextures.leaf_mat("leaves", 1.0, lod))
 	spec.trunk_r = r0
 	spec.trunk_h = h * 0.75
 	return spec
@@ -242,7 +254,7 @@ static func _snag(mr: RandomNumberGenerator, near: bool) -> Spec:
 			bark.limb(tip, t2, 0.03, 0.01, 3, _bark_col(0.1, tint), _bark_col(0.15, tint))
 	var spec := Spec.new()
 	spec.mesh = ArrayMesh.new()
-	bark.add_to(spec.mesh, WorldTextures.bark_mat("bark_oak", 0.7, 0.35))
+	bark.add_to(spec.mesh, WorldTextures.bark_mat("bark_oak", 0.7, 0.35, WorldTextures.LOD_NEAR if near else WorldTextures.LOD_FAR))
 	spec.trunk_r = r0
 	spec.trunk_h = h
 	return spec

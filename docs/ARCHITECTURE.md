@@ -44,7 +44,7 @@ handles **decisions, damage and encounter rules**. Enemy model and animation fil
 the Combat agent. The choreographer sends exact enemy motion changes (pose keys, timings,
 telegraph cues) to the lead, and the Combat agent applies them. See `docs/COMBAT_CHOREOGRAPHY.md`.
 
-Full game while the default build is player-only: `godot --path . -- --full`.
+The full game is the default launch. The player-only movement playground runs with `godot --path . -- --playground` (`tests/playground_screens.tscn` needs that arg too).
 
 **Never edit another owner's file.** If you need a change in a shared/other file, put the request in
 your final report (exact proposed change). The lead integrates. Global `class_name`s must be

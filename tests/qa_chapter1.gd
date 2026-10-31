@@ -256,11 +256,12 @@ func _step_beginning() -> void:
 	print("--- A Small Beginning")
 	check(Quests.is_quest_active(&"a_small_beginning"), "first quest active after boot")
 	check(_near(player.global_position, WorldLayout.PLAYER_START, 1.0) and _on_ground(), "player spawned on the ground at the glade start")
-	# The spawn point lies inside the glade landmark zone, so step 1 completes on spawn.
-	var idx := Quests.get_step_index(&"a_small_beginning")
-	if idx == 1:
-		note("'Look around the glade' completes the moment the player spawns (spawn is inside the glade zone): design item, see report")
-	check(idx >= 0, "first quest has a current step (%d)" % idx)
+	# Step 1 is a short walk; it must NOT complete just by spawning.
+	check(Quests.get_step_index(&"a_small_beginning") == 0, "first step still pending after spawn")
+	_objective_ok("Walk to the north edge of the glade", QuestData.GLADE_EDGE_POS, "beginning")
+	await _tp(QuestData.GLADE_EDGE_POS)
+	await _wait(0.3)
+	check(Quests.get_step_index(&"a_small_beginning") == 1, "walking to the glade edge completes step 1")
 	_objective_ok("Read the signpost", QuestData.SIGNPOST_POS, "beginning")
 	await _shot("01_glade")
 	await _use(&"glade_signpost", "signpost")

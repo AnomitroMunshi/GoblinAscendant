@@ -4,13 +4,17 @@ extends Node3D
 ## system in dependency order. A missing part is skipped with a warning so
 ## the project stays runnable while parts are in development.
 
-## Player-only build: the movement playground replaces the world and nothing
-## else is spawned. Launch with `-- --full` (user arg) to build the full game,
-## e.g. `godot --path . -- --full`. Set false to make the full game the default.
-const PLAYER_ONLY := true
+## The full game is the default. The player-only movement playground (no world,
+## enemies or UI) is available with the `--playground` user arg:
+##   godot --path . -- --playground
+## `-- --full` is still accepted (it's the default) so older commands keep working.
+const PLAYER_ONLY := false
 
 static func player_only() -> bool:
-	return PLAYER_ONLY and not OS.get_cmdline_user_args().has("--full")
+	var args := OS.get_cmdline_user_args()
+	if args.has("--full"):
+		return false
+	return PLAYER_ONLY or args.has("--playground")
 
 const PARTS := [
 	["World", "res://scripts/world/world.gd"],          # World agent

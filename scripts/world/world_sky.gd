@@ -53,7 +53,7 @@ func _build_environment() -> void:
 	# depth fog with aerial perspective (blends distant terrain into the sky)
 	env.fog_enabled = true
 	env.fog_mode = Environment.FOG_MODE_EXPONENTIAL
-	env.fog_light_color = Color(0.66, 0.74, 0.84)
+	env.fog_light_color = Color(0.60, 0.70, 0.72)
 	env.fog_light_energy = 1.0
 	env.fog_sun_scatter = 0.18
 	env.fog_density = 0.0011
@@ -74,8 +74,8 @@ func _build_environment() -> void:
 	env.ssao_power = 1.4
 	env.ssao_light_affect = 0.15
 	# volumetric fog (high only)
-	env.volumetric_fog_density = 0.0028
-	env.volumetric_fog_albedo = Color(0.92, 0.94, 1.0)
+	env.volumetric_fog_density = 0.0045
+	env.volumetric_fog_albedo = Color(0.86, 0.92, 0.9)
 	env.volumetric_fog_anisotropy = 0.6
 	env.volumetric_fog_length = 90.0
 	env.volumetric_fog_sky_affect = 0.0
@@ -328,9 +328,9 @@ func apply_quality() -> void:
 			sun.directional_shadow_max_distance = 90.0 * clampf(vd, 0.7, 1.3)
 		_:
 			sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
-			sun.directional_shadow_max_distance = 140.0 * clampf(vd, 0.7, 1.3)
+			sun.directional_shadow_max_distance = 100.0 * clampf(vd, 0.7, 1.3)
 			sun.directional_shadow_split_1 = 0.08
 			sun.directional_shadow_split_2 = 0.22
 			sun.directional_shadow_split_3 = 0.5
 	# volumetric fog adds haze: thin the depth fog a bit to compensate
-	env.fog_density = 0.0009 if q < 2 else 0.0007
+	env.fog_density = 0.0016 if q < 2 else 0.0012

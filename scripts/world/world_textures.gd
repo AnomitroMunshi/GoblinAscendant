@@ -180,17 +180,60 @@ static func rock_mat(kind: String = "rock_mossy", moss: float = 0.6, scale: floa
 
 
 ## Triplanar bark / wood with wind sway (COLOR.a weight).
-static func bark_mat(kind: String = "bark_oak", scale: float = 0.6, moss: float = 0.15) -> ShaderMaterial:
-	return _shader_mat("bark_%s_%.2f_%.2f" % [kind, scale, moss], "res://shaders/world/bark.gdshader", {
+## LOD bands (metres from the gameplay camera). 0 = near detail, 1 = far.
+## WorldRoot rescales them with view distance and pushes view_pos every frame.
+const LOD_NEAR := 0
+const LOD_FAR := 1
+const LOD_ALL := -1
+static var lod_split := 48.0
+static var _lod_mats: Array = []   # [ShaderMaterial, lod]
+
+
+static func bark_mat(kind: String = "bark_oak", scale: float = 0.6, moss: float = 0.15, lod: int = LOD_ALL) -> ShaderMaterial:
+	var m := _shader_mat("bark_%s_%.2f_%.2f_%d" % [kind, scale, moss, lod], "res://shaders/world/bark.gdshader", {
 		"albedo_tex": tex(kind), "normal_tex": tex(kind, "normal"),
 		"moss_tex": tex("moss"), "tex_scale": scale, "moss_amount": moss,
 	})
+	_track_lod(m, lod)
+	return m
 
 
-static func leaf_mat(name: String = "leaves", sway: float = 1.0) -> ShaderMaterial:
-	return _shader_mat("leaf_%s_%.2f" % [name, sway], "res://shaders/world/leaves.gdshader", {
+static func leaf_mat(name: String = "leaves", sway: float = 1.0, lod: int = LOD_ALL) -> ShaderMaterial:
+	var m := _shader_mat("leaf_%s_%.2f_%d" % [name, sway, lod], "res://shaders/world/leaves.gdshader", {
 		"atlas": foliage_atlas(), "sway_strength": sway,
 	})
+	_track_lod(m, lod)
+	return m
+
+
+static func _track_lod(m: ShaderMaterial, lod: int) -> void:
+	for e: Array in _lod_mats:
+		if e[0] == m:
+			return
+	_lod_mats.append([m, lod])
+	_apply_band(m, lod)
+
+
+static func _apply_band(m: ShaderMaterial, lod: int) -> void:
+	match lod:
+		LOD_NEAR:
+			m.set_shader_parameter("lod_band", Vector2(0.0, lod_split))
+		LOD_FAR:
+			m.set_shader_parameter("lod_band", Vector2(lod_split, 100000.0))
+		_:
+			m.set_shader_parameter("lod_band", Vector2(0.0, 100000.0))
+
+
+static func set_lod_split(d: float) -> void:
+	lod_split = d
+	for e: Array in _lod_mats:
+		_apply_band(e[0], e[1])
+
+
+## Called every frame with the gameplay camera position (few materials).
+static func set_view_pos(p: Vector3) -> void:
+	for e: Array in _lod_mats:
+		(e[0] as ShaderMaterial).set_shader_parameter("view_pos", p)
 
 
 static func grass_mat() -> ShaderMaterial:

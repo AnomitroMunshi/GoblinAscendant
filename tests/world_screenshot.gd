@@ -7,6 +7,9 @@ extends Node
 const VIEWS := [
 	# name, camera position (y = metres above ground), look-at (y above ground)
 	["glade", Vector3(-12, 1.8, 192), Vector3(-6, 1.5, 150)],
+	["trail", Vector3(-48, 1.7, 126), Vector3(-80, 1.6, 110)],
+	["deep_woods", Vector3(-128, 1.7, 62), Vector3(-160, 2.0, 40)],
+	["treeline", Vector3(14, 1.7, 200), Vector3(-10, 1.0, 175)],
 	["glade_wide", Vector3(-40, 9.0, 212), Vector3(0, 0.0, 160)],
 	["woods", Vector3(-112, 1.8, 112), Vector3(-150, 2.0, 80)],
 	["den", Vector3(-160, 2.5, 100), Vector3(-176, 1.0, 122)],

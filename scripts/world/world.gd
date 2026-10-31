@@ -77,6 +77,8 @@ func _ready() -> void:
 		node.build(self)
 		modules[m[0]] = node
 		stats["%s_msec" % m[0].to_lower()] = (Time.get_ticks_usec() - t1) / 1000.0
+		if "stats" in node:
+			stats[String(m[0]).to_lower()] = node.stats
 
 	zones = WorldZones.new()
 	add_child(zones)
@@ -170,12 +172,21 @@ func _apply_vis(gi: GeometryInstance3D, base_end: float, base_begin: float) -> v
 	gi.visibility_range_begin_margin = 8.0 if base_begin > 0.0 else 0.0
 
 
+func _process(_delta: float) -> void:
+	var cam := get_viewport().get_camera_3d()
+	if cam:
+		WorldTextures.set_view_pos(cam.global_position)
+
+
 func _on_setting_changed(key: StringName) -> void:
 	if key == &"graphics_quality" or key == &"view_distance":
 		_apply_quality()
 
 
 func _apply_quality() -> void:
+	var vd := clampf(float(Settings.get_value(&"view_distance", 1.0)), 0.3, 2.0)
+	var q := Settings.quality()
+	WorldTextures.set_lod_split((26.0 if q == 0 else (34.0 if q == 1 else 42.0)) * vd)
 	for e: Array in _vis_nodes:
 		if is_instance_valid(e[0]):
 			_apply_vis(e[0], e[1], e[2])

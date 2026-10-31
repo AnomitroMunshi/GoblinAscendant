@@ -138,7 +138,7 @@ func cylinder(xf: Transform3D, r_bot: float, r_top: float, height: float, segs: 
 func limb(a: Vector3, b: Vector3, r_a: float, r_b: float, segs: int, col: Color, col_b: Color = Color(0, 0, 0, 0), sway_a: float = 0.0, sway_b: float = 0.0) -> void:
 	var d := b - a
 	var len := d.length()
-	if len < 0.001:
+	if len < 0.001 or len > 40.0 or not d.is_finite():
 		return
 	var up := d / len
 	var side := up.cross(Vector3.FORWARD if absf(up.dot(Vector3.FORWARD)) < 0.9 else Vector3.RIGHT).normalized()
