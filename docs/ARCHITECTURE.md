@@ -281,6 +281,12 @@ Use `MultiMeshInstance3D` for repeated foliage; `visibility_range_end` for culli
 shadow-casting lights.
 
 ## Testing
+**Run tests in parallel (user direction).** `bash tools/run_tests.sh` runs every headless suite
+concurrently, takes about 42 s, and returns non-zero on any failure. Pass words to filter:
+`bash tools/run_tests.sh player combat`. Suites that touch `user://savegame.json` share one
+sequential lane. A new suite gets a line in the runner and must print one clear summary line.
+Re-run only the suites affected by a change.
+
 After `class_name` changes run an import so the global class cache updates:
 `"$G" --headless --path . --import`  then  `"$G" --headless --path . --quit-after 600`
 (G = Godot console binary above). Other agents edit in parallel — if an error is clearly in

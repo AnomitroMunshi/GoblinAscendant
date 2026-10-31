@@ -171,6 +171,7 @@ Revised Chapter 1 weapon path: rough knife â†’ optional ordinary weapon finds â†
 
 ## Progress log
 ### 2026-10-31
+- Lead: added `tools/run_tests.sh` (user: tests must be fast and parallel). All 6 headless suites run concurrently with save-file users serialized: player 79/79, combat 93/93, world 42/42, audio pass, progression 136/136, ui_hud 45/45, in 42 s wall time.
 - Lead: user cut the draft to "only the combat Chapter 1 needs".
   - Character Art stopped and deferred. Enemies keep their current working models; enemy files were unchanged since 336ef54 and combat is still 93/93. Its kit in `scripts/characters/` stays unused.
   - Choreography is wrapping up. It keeps knife, sword, sling and unarmed, matching the story draft's first-build scope (STORY_CHAPTER_1.md line 11). The enemy spec is already written; further enemy motion work is deferred.
