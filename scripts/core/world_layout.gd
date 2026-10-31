@@ -58,6 +58,21 @@ const RIVER_WIDTH := 10.0
 const FORDS := [Vector3(12, 0, -40), Vector3(60, 0, 100)]
 const BRIDGE := Vector3(61, 0, 165)
 
+# Still water. All wadeable (max depth ~0.7 m: no swimming yet), so is_in_water()
+# slows the player. "kind" sets the look:
+#   pond  - small clear pool        spring - rock-ringed clear spring, gently bubbling
+#   lake  - larger open water       marsh  - murky swamp: reeds, dead trees, mist, lily pads
+const STILL_WATERS := [
+	{"id": &"glade_pond", "kind": &"pond", "pos": Vector3(30, 0, 182), "radius": 7.0},
+	{"id": &"woods_pond", "kind": &"pond", "pos": Vector3(-100, 0, 140), "radius": 9.0},
+	{"id": &"spring", "kind": &"spring", "pos": Vector3(-55, 0, 55), "radius": 5.0},
+	{"id": &"east_lake", "kind": &"lake", "pos": Vector3(188, 0, 75), "radius": 17.0},
+	{"id": &"marsh", "kind": &"marsh", "pos": Vector3(-192, 0, -88), "radius": 30.0},
+]
+# Drinking at the spring restores health (Interactable "spring_drink", World-owned).
+const SPRING := Vector3(-55, 0, 55)
+const MARSH := Vector3(-192, 0, -88)
+
 # Distant landmark outside the playable area (visible from overlooks).
 const CASTLE_LANDMARK := Vector3(-90, 150, -620)
 
@@ -94,6 +109,9 @@ const LANDMARKS := {
 	&"outpost": {"name": "Raider Outpost", "pos": RAIDER_OUTPOST, "radius": 22.0},
 	&"ogre_clearing": {"name": "Ogre's Clearing", "pos": OGRE_CLEARING, "radius": 30.0},
 	&"cave": {"name": "Hollow Cave", "pos": CAVE_ENTRANCE, "radius": 14.0},
+	&"marsh": {"name": "Sunken Marsh", "pos": MARSH, "radius": 28.0},
+	&"spring": {"name": "Clearwater Spring", "pos": SPRING, "radius": 10.0},
+	&"east_lake": {"name": "Stillmere", "pos": Vector3(188, 0, 75), "radius": 22.0},
 }
 
 
@@ -104,6 +122,17 @@ static func distance_to_river(p: Vector3) -> float:
 		var b: Vector3 = RIVER_POINTS[i + 1]
 		var q := Geometry3D.get_closest_point_to_segment(Vector3(p.x, 0, p.z), a, b)
 		best = minf(best, q.distance_to(Vector3(p.x, 0, p.z)))
+	return best
+
+
+## Distance from p to the nearest water edge (river bank or still-water shore);
+## negative when p is inside a still water. Use to keep spawns/props dry.
+static func distance_to_water(p: Vector3) -> float:
+	var best := distance_to_river(p) - RIVER_WIDTH * 0.5
+	var flat := Vector2(p.x, p.z)
+	for w: Dictionary in STILL_WATERS:
+		var c: Vector3 = w["pos"]
+		best = minf(best, flat.distance_to(Vector2(c.x, c.z)) - float(w["radius"]))
 	return best
 
 

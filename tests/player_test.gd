@@ -230,6 +230,43 @@ func _run() -> void:
 	await wait(1.4)
 	check(dummy.hits == 1, "heavy attack hits once (hits=%d)" % dummy.hits)
 
+	print("-- holster and unarmed")
+	await wait(0.3)
+	await tap(&"holster")
+	check(player.is_weapon_holstered() and not player.model.sword.visible, "H holsters knife")
+	check(player.model.get_node("ScaleRoot/roll/hips/StowedKnife").visible, "holstered knife visible at waist")
+	await wait(0.2)
+	check(player.model.fore_l.to_global(Vector3(0, -0.178, 0)).y < player.global_position.y + 0.6, "unarmed idle hands rest below chest")
+	Input.action_press(&"block")
+	await wait(0.3)
+	check(player.state == Player.State.BLOCK, "unarmed Q enters guard")
+	check(player.model.fore_l.to_global(Vector3(0, -0.178, 0)).y > player.global_position.y + 0.72, "boxing guard raises fist near jaw")
+	Input.action_release(&"block")
+	await wait(0.3)
+	check(player.model.fore_l.to_global(Vector3(0, -0.178, 0)).y < player.global_position.y + 0.6, "releasing Q lowers hands")
+	dummy.global_position = player.global_position + player.get_facing() * 0.55
+	dummy.hits = 0
+	dummy.total_damage = 0.0
+	player.stamina = player.max_stamina
+	await tap(&"attack_light")
+	check(player.model.anim_action == &"punch1", "unarmed LMB starts punch")
+	check(not player.toggle_holster(), "cannot draw during punch")
+	await wait(0.6)
+	check(dummy.hits == 1, "punch hits once")
+	check(dummy.total_damage > 0.0 and dummy.total_damage < Progression.attack_power(), "punch deals less damage than knife")
+	dummy.global_position = player.global_position + player.get_facing() * 0.6
+	dummy.hits = 0
+	await tap(&"attack_heavy")
+	check(player.model.anim_action == &"kick", "unarmed RMB starts kick")
+	await wait(1.3)
+	check(dummy.hits == 1, "kick hits once")
+	GameState.set_menu_open(true)
+	check(not player.toggle_holster(), "menu blocks holster")
+	GameState.set_menu_open(false)
+	await tap(&"holster")
+	check(not player.is_weapon_holstered() and player.model.sword.visible, "H draws knife again")
+	check(not player.model.get_node("ScaleRoot/roll/hips/StowedKnife").visible, "drawing hides waist copy")
+
 	print("-- lock-on")
 	player.camera_rig.yaw = 0.0
 	player.camera_rig._apply_rotation()

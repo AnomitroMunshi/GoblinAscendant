@@ -47,8 +47,8 @@ static func create(type: StringName) -> EnemyStats:
 		&"wolf":
 			s.display_name = "Wolf"
 			s.faction = Factions.WOLF
-			s.max_health = 34.0
-			s.damage = 7.0
+			s.max_health = 38.0
+			s.damage = 8.0
 			s.move_speed = 2.4
 			s.chase_speed = 7.0
 			s.turn_speed = 9.0
@@ -95,8 +95,8 @@ static func create(type: StringName) -> EnemyStats:
 		&"goblin_raider":
 			s.display_name = "Goblin Raider"
 			s.faction = Factions.GOBLIN_RAIDER
-			s.max_health = 45.0
-			s.damage = 9.0
+			s.max_health = 48.0
+			s.damage = 8.0
 			s.move_speed = 2.0
 			s.chase_speed = 5.4
 			s.detection_radius = 14.0
@@ -183,7 +183,7 @@ static func create(type: StringName) -> EnemyStats:
 		&"ogre":
 			s.display_name = "Grukk the Ogre"
 			s.faction = Factions.OGRE
-			s.max_health = 650.0
+			s.max_health = 560.0
 			s.damage = 26.0
 			s.move_speed = 1.8
 			s.chase_speed = 3.4

@@ -5,8 +5,12 @@ extends Node3D
 ## the project stays runnable while parts are in development.
 
 ## Player-only build: the movement playground replaces the world and nothing
-## else is spawned. Set false to build the full game again.
+## else is spawned. Launch with `-- --full` (user arg) to build the full game,
+## e.g. `godot --path . -- --full`. Set false to make the full game the default.
 const PLAYER_ONLY := true
+
+static func player_only() -> bool:
+	return PLAYER_ONLY and not OS.get_cmdline_user_args().has("--full")
 
 const PARTS := [
 	["World", "res://scripts/world/world.gd"],          # World agent
@@ -25,7 +29,7 @@ func _ready() -> void:
 		GameState.pending_load = false
 		if not SaveManager.load_game():
 			push_warning("Continue requested but no valid save; starting fresh.")
-	if PLAYER_ONLY:
+	if player_only():
 		# Spawn/respawn inside the playground, not at the valley's glade.
 		GameState.checkpoint_position = Vector3(0, 0, 8)
 		GameState.has_safe_position = false

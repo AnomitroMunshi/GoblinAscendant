@@ -1,20 +1,14 @@
 class_name PlayerGoblinModel
 extends Node3D
-## Procedural, articulated goblin built from faceted (flat-shaded, low-poly)
-## primitives, matching docs/concepts/goblin-player-v1.png: olive skin, huge
-## swept ears, amber eyes, furrowed brows, lower fangs, sleeveless brown vest
-## with a diagonal strap and square steel buckles, leather bracers, chunky
-## cuffed boots and a faceted steel short sword.
-## Faces -Z, feet at y=0, roughly 1.1 m tall. All animation is code-driven: the
-## Player writes the public "anim_*" fields every physics frame and this node
-## blends joint rotations toward per-state target poses in _process.
-## Evolution: set_stage(&"hobgoblin") grows the model (~1.3x), deepens the
-## skin, shows armour and swaps to a bigger blade with a glow flash.
+## Starting survivor: bare skin, opaque torn waist wrap, bare feet and chipped knife.
+## Built entirely in Godot; animation joint names remain compatible with Player.
+## Face follows the user's dark-haired, narrow-eyed goblin reference.
+## Hobgoblin redesign and acquired equipment are separate future work.
 
 const STAGE_SCALE := {&"goblin": 1.0, &"hobgoblin": 1.3}
 const HIP_HEIGHT := 0.42
 const BLADE_STEEL := Color(0.66, 0.68, 0.71)
-const NEUTRAL_BROW_Z := 0.16   # concept: brows are furrowed even at rest
+const NEUTRAL_BROW_Z := 0.23   # concept: brows are furrowed even at rest
 
 # ---- fed by the Player every frame -------------------------------------------
 var anim_state: StringName = &"idle"   # idle, move, air, attack, dodge, backstep, block, hurt, cast, dead, dash
@@ -22,10 +16,28 @@ var anim_speed := 0.0                  # horizontal speed m/s
 var anim_vertical := 0.0               # vertical speed m/s
 var anim_grounded := true
 var anim_sprinting := false
-var anim_action: StringName = &""      # light1, light2, light3, heavy
+var anim_action: StringName = &""      # move "anim" id: light1.., punch1.., sword_cut1..
 var anim_phase := 0.0                  # 0..1 windup, 1..2 active, 2..3 recovery
-var anim_t := 0.0                      # normalized progress for dodge / cast / dash
+var anim_t := 0.0                      # normalized progress for dodge / cast / dash / hurt
+var anim_move: Dictionary = {}         # ChoreoLibrary move resolved at attack start
+var cast_skill: StringName = &""       # ability id for skill-specific cast poses
+var hurt_kind: StringName = &"stagger" # stagger, knockdown, guard_break
+var hurt_dir := Vector2(0, 1)          # hit direction in body space: x = from right, y = from front
 var footsteps_enabled := true
+
+var unarmed := false
+var weapon_type: StringName = &"knife" # equipped weapon moveset (ChoreoLibrary type)
+var _stowed_weapon: Node3D
+var _stowed_main: Node3D
+var _knife_node: Node3D
+var _weapon_nodes: Dictionary = {}     # type -> Node3D under the grip socket
+var _sling_arm: Node3D
+var _sling_dir := Vector3.DOWN
+var _flinch_dir := Vector2(0, 1)
+var _block_hit := 0.0
+var _ik: Dictionary = {}               # smoothed IK channels (hips space)
+var foot_l: Node3D
+var foot_r: Node3D
 
 var stage: StringName = &"goblin"
 var skin_mat: StandardMaterial3D
@@ -69,6 +81,70 @@ var _rest: Dictionary = {}
 
 func _ready() -> void:
 	_build()
+	_stowed_weapon = _knife_node.duplicate() as Node3D
+	_stowed_weapon.name = "StowedKnife"
+	hips.add_child(_stowed_weapon)
+	_stowed_weapon.position = Vector3(0.145, -0.005, 0.055)
+	_stowed_weapon.rotation = Vector3(-PI * 0.5, 0, -0.15)
+	_stowed_weapon.visible = false
+	set_weapon(weapon_type)
+
+
+## Shows the equipped weapon in the hand socket (or stowed when holstered).
+## The knife is always carried: it sits at the waist whenever it is not in hand.
+func set_weapon(type: StringName) -> void:
+	weapon_type = type if ChoreoLibrary.has(type) else &"knife"
+	for t: StringName in [&"sword", &"sling"]:
+		if t == weapon_type and not _weapon_nodes.has(t):
+			var n := ChoreoWeapons.build(t)
+			sword.add_child(n)
+			_weapon_nodes[t] = n
+	_knife_node.visible = weapon_type == &"knife"
+	for t: StringName in _weapon_nodes:
+		(_weapon_nodes[t] as Node3D).visible = t == weapon_type
+	_sling_arm = (_weapon_nodes[&"sling"] as Node3D).get_node_or_null("SlingArm") if _weapon_nodes.has(&"sling") else null
+	if is_instance_valid(_stowed_main):
+		_stowed_main.queue_free()
+		_stowed_main = null
+	var ms := ChoreoLibrary.moveset(weapon_type)
+	if ms.has("stow") and weapon_type != &"knife":
+		var st: Dictionary = ms["stow"]
+		_stowed_main = ChoreoWeapons.build(weapon_type)
+		_stowed_main.name = "StowedMain"
+		(hips if st.get("parent", &"hips") == &"hips" else torso).add_child(_stowed_main)
+		_stowed_main.position = st["pos"]
+		_stowed_main.basis = Basis.looking_at(st.get("dir", Vector3.FORWARD), st.get("up", Vector3.UP))
+		if st.get("coiled", false):
+			var arm := _stowed_main.get_node_or_null("SlingArm") as Node3D
+			if arm:
+				arm.scale = Vector3(1.0, 0.3, 1.0)
+	_ik.clear()
+	set_weapon_drawn(not unarmed)
+
+
+func set_weapon_drawn(drawn: bool) -> void:
+	unarmed = not drawn
+	sword.visible = drawn and weapon_type != &"unarmed"
+	if is_instance_valid(_stowed_weapon):
+		_stowed_weapon.visible = not (drawn and weapon_type == &"knife")
+	if is_instance_valid(_stowed_main):
+		_stowed_main.visible = not drawn
+
+
+## The moveset currently animating (unarmed while holstered).
+func active_moveset() -> Dictionary:
+	return ChoreoLibrary.moveset(&"unarmed" if unarmed else weapon_type)
+
+
+func get_hand_position(right: bool) -> Vector3:
+	return (fore_r if right else fore_l).to_global(Vector3(0, -0.178, 0))
+
+
+## World point where a sling stone leaves (pouch) or the weapon hand.
+func get_release_point() -> Vector3:
+	if _sling_arm and _sling_arm.is_visible_in_tree():
+		return _sling_arm.to_global(Vector3(0, -ChoreoWeapons.SLING_CORD, 0))
+	return get_hand_position(true)
 
 
 # =============================================================== building
@@ -151,41 +227,251 @@ static func _flat(mesh: PrimitiveMesh) -> ArrayMesh:
 	return st.commit()
 
 
-static func _fsphere(r: float, seg: int = 10, rings: int = 7) -> ArrayMesh:
-	var s := _sphere(r, seg)
-	s.rings = rings
-	return _flat(s)
+static func _fsphere(r: float, seg: int = 10, rings: int = 7) -> SphereMesh:
+	# Rounded organic forms retain the primitive silhouette without triangle seams.
+	var s := _sphere(r, maxi(seg * 2, 24))
+	s.rings = maxi(rings * 2, 16)
+	return s
 
 
-static func _fcyl(top: float, bottom: float, h: float, seg: int = 8) -> ArrayMesh:
-	return _flat(_cyl(top, bottom, h, seg))
+static func _fcyl(top: float, bottom: float, h: float, seg: int = 8) -> CylinderMesh:
+	return _cyl(top, bottom, h, maxi(seg * 2, 20))
 
 
 static func _fbox(size: Vector3) -> ArrayMesh:
 	return _flat(_box(size))
 
 
+## Elliptical rings create continuous anatomy and an opaque wrap with a ragged hem.
+static func _profile(rings: Array[Vector3], ragged: bool = false) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var count := 24
+	for row in range(rings.size() - 1):
+		for col in count:
+			var points: Array[Vector3] = []
+			for corner in [Vector2i(row, col), Vector2i(row, col + 1), Vector2i(row + 1, col), Vector2i(row + 1, col + 1)]:
+				var ring := rings[corner.x]
+				var angle := TAU * float(corner.y) / count
+				var y := ring.y
+				if ragged and corner.x == rings.size() - 1:
+					y += 0.012 * sin(angle * 7.0) + 0.009 * cos(angle * 11.0)
+				points.append(Vector3(sin(angle) * ring.x, y, cos(angle) * ring.z))
+			var indices := [0, 2, 1, 1, 2, 3] if rings[row + 1].y > rings[row].y else [0, 1, 2, 1, 3, 2]
+			for index in indices:
+				st.add_vertex(points[index])
+	st.index()
+	st.generate_normals()
+	return st.commit()
+
+
+## One continuous sculpted surface: skull, cheek planes, jaw, brow and nose.
+static func _face_depth(x: float, y: float) -> float:
+	var front := 0.156 * sqrt(maxf(0.0, 1.0 - pow(x / 0.19, 2.0)))
+	front += 0.047 * exp(-pow(x / 0.043, 2.0) - pow((y - 0.151) / 0.034, 2.0))
+	front += 0.018 * exp(-pow(x / 0.024, 2.0) - pow((y - 0.201) / 0.07, 2.0))
+	for side in [-1.0, 1.0]:
+		front -= 0.028 * exp(-pow((x - side * 0.083) / 0.045, 2.0) - pow((y - 0.213) / 0.027, 2.0))
+		front += 0.022 * exp(-pow((x - side * 0.09) / 0.053, 2.0) - pow((y - 0.255) / 0.022, 2.0))
+		front += 0.014 * exp(-pow((x - side * 0.112) / 0.043, 2.0) - pow((y - 0.142) / 0.03, 2.0))
+	if y > 0.285:
+		front *= sqrt(maxf(0.0, 1.0 - pow((y - 0.285) / 0.095, 2.0)))
+	return front
+
+
+static func _head_mesh() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var rows := 56
+	var cols := 80
+	var widths := [0.105, 0.14, 0.164, 0.181, 0.19, 0.189, 0.185, 0.171, 0.141, 0.08, 0.001]
+	for row in rows:
+		for col in cols:
+			var points: Array[Vector3] = []
+			for ij in [Vector2i(row, col), Vector2i(row, col + 1), Vector2i(row + 1, col), Vector2i(row + 1, col + 1)]:
+				var t := float(ij.x) / rows
+				var f := t * (widths.size() - 1)
+				var index := mini(int(f), widths.size() - 2)
+				var width := lerpf(widths[index], widths[index + 1], f - index)
+				if t > 0.6:
+					width = 0.185 * sqrt(maxf(0.00001, 1.0 - pow((t - 0.6) / 0.4, 2.0)))
+				var angle := TAU * float(ij.y) / cols
+				var x := width * sin(angle)
+				var y := t * 0.38
+				var z := cos(angle) * width * 0.88 + 0.022
+				if cos(angle) < 0.0:
+					var blend := pow(-cos(angle), 2.0)
+					z = lerpf(z, -_face_depth(x, y), blend)
+				points.append(Vector3(x, y, z))
+			for index in [0, 2, 1, 1, 2, 3]:
+				st.add_vertex(points[index])
+	for col in cols:
+		var a := TAU * col / cols
+		var b := TAU * (col + 1) / cols
+		st.add_vertex(Vector3(0, 0, 0))
+		for angle in [a, b]:
+			var x := float(widths[0]) * sin(angle)
+			var z := cos(angle) * float(widths[0]) * 0.88 + 0.022
+			if cos(angle) < 0.0:
+				z = lerpf(z, -_face_depth(x, 0), pow(-cos(angle), 2.0))
+			st.add_vertex(Vector3(x, 0, z))
+	st.index()
+	st.generate_normals()
+	return st.commit()
+
+
+## Tapered eyelids bridge into the head instead of a sphere-shaped eye socket.
+static func _eyelid_mesh(side: float) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in 40:
+		var points: Array[Vector3] = []
+		for corner: Vector2i in [Vector2i(0, i), Vector2i(0, i + 1), Vector2i(1, i), Vector2i(1, i + 1)]:
+			var angle := TAU * corner.y / 40.0
+			var inner := corner.x == 1
+			var x := cos(angle) * (0.038 if inner else 0.047)
+			var y := sin(angle) * (0.018 if inner else 0.025) + x * side * 0.17
+			var z := -0.163 if inner else -_face_depth(0.083 * side + x, 0.213 + y) - 0.003
+			points.append(Vector3(x, y, z + 0.15))
+		for index in [0, 1, 2, 1, 3, 2]:
+			st.add_vertex(points[index])
+	st.generate_normals()
+	return st.commit()
+
+
+static func _ear_mesh(inset: bool = false) -> ArrayMesh:
+	var outline: Array[Vector2] = [Vector2(-0.055, 0.0), Vector2(-0.082, 0.075), Vector2(-0.065, 0.14), Vector2(0, 0.28), Vector2(0.06, 0.14), Vector2(0.079, 0.075), Vector2(0.05, 0.0)]
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var center := Vector3(0, 0.105, -0.019 if inset else 0.009)
+	for i in outline.size():
+		var a := outline[i]
+		var b := outline[(i + 1) % outline.size()]
+		if inset:
+			a = a * 0.74 + Vector2(0, 0.023)
+			b = b * 0.74 + Vector2(0, 0.023)
+		var z := -0.028 if inset else -0.033
+		st.add_vertex(center)
+		st.add_vertex(Vector3(a.x, a.y, z))
+		st.add_vertex(Vector3(b.x, b.y, z))
+	st.generate_normals()
+	return st.commit()
+
+
+## Curved tapered polygon locks, authored in head space; no imported hair assets.
+static func _hair_lock(start: Vector3, bend: Vector3, tip: Vector3, width: float) -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var points: Array[Vector3] = []
+	for row in 7:
+		var t := float(row) / 6.0
+		var center := start * pow(1.0 - t, 2.0) + bend * (2.0 * t * (1.0 - t)) + tip * t * t
+		var tangent := ((bend - start) * (1.0 - t) + (tip - bend) * t).normalized()
+		var right := tangent.cross(Vector3.FORWARD).normalized()
+		if right.length_squared() < 0.1:
+			right = Vector3.RIGHT
+		var normal := right.cross(tangent).normalized()
+		var radius := width * pow(1.0 - t, 0.75) * (0.75 + sin(t * PI) * 0.4)
+		for col in 6:
+			var angle := TAU * col / 6.0
+			points.append(center + right * cos(angle) * radius + normal * sin(angle) * radius * 0.45)
+	for row in 6:
+		for col in 6:
+			var a := row * 6 + col
+			var b := row * 6 + (col + 1) % 6
+			for index in [a, b, a + 6, b, b + 6, a + 6]:
+				st.add_vertex(points[index])
+	st.generate_normals()
+	return st.commit()
+
+
+func _build_hair() -> void:
+	var hair := Palette.mat(Color(0.075, 0.061, 0.048), 0.94).duplicate()
+	hair.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var lighter := Palette.mat(Color(0.11, 0.089, 0.061), 0.94).duplicate()
+	lighter.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var cap := _m(head, _fsphere(0.18, 18, 12), hair, Vector3(0, 0.31, 0.025), Vector3.ZERO, Vector3(1.05, 0.64, 0.98))
+	cap.name = "HairCap"
+	# Irregular swept crown silhouette, with alternating lengths and directions.
+	var locks: Array[Array] = [
+		[Vector3(-0.13, 0.34, 0.01), Vector3(-0.23, 0.42, -0.02), Vector3(-0.16, 0.51, -0.005), 0.065],
+		[Vector3(-0.07, 0.37, -0.01), Vector3(-0.10, 0.50, -0.02), Vector3(-0.055, 0.57, 0.015), 0.066],
+		[Vector3(0, 0.38, -0.015), Vector3(0.035, 0.48, -0.02), Vector3(0.105, 0.53, 0), 0.065],
+		[Vector3(0.08, 0.36, 0), Vector3(0.19, 0.45, 0), Vector3(0.24, 0.49, 0.03), 0.06],
+		[Vector3(0.13, 0.32, 0.04), Vector3(0.23, 0.37, 0.06), Vector3(0.265, 0.41, 0.07), 0.055],
+		[Vector3(-0.12, 0.31, 0.10), Vector3(-0.23, 0.37, 0.13), Vector3(-0.26, 0.40, 0.12), 0.055],
+		[Vector3(0.025, 0.35, 0.13), Vector3(0.09, 0.43, 0.21), Vector3(0.15, 0.48, 0.22), 0.075],
+		[Vector3(-0.06, 0.34, 0.13), Vector3(-0.10, 0.43, 0.22), Vector3(-0.035, 0.49, 0.23), 0.065],
+		# Front fringe: tapered locks overlap naturally, tips stop above the eyes.
+		[Vector3(-0.125, 0.33, -0.10), Vector3(-0.16, 0.29, -0.17), Vector3(-0.13, 0.225, -0.174), 0.052],
+		[Vector3(-0.075, 0.35, -0.12), Vector3(-0.08, 0.28, -0.18), Vector3(-0.018, 0.25, -0.19), 0.058],
+		[Vector3(0.005, 0.36, -0.12), Vector3(0.04, 0.30, -0.20), Vector3(0.105, 0.27, -0.18), 0.062],
+		[Vector3(0.085, 0.34, -0.10), Vector3(0.15, 0.31, -0.16), Vector3(0.17, 0.235, -0.12), 0.052],
+		[Vector3(-0.165, 0.285, 0), Vector3(-0.185, 0.23, -0.025), Vector3(-0.16, 0.155, -0.03), 0.033],
+		[Vector3(0.165, 0.28, 0), Vector3(0.18, 0.22, -0.02), Vector3(0.16, 0.16, -0.02), 0.033],
+		[Vector3(-0.12, 0.25, 0.13), Vector3(-0.15, 0.19, 0.15), Vector3(-0.14, 0.13, 0.13), 0.045],
+		[Vector3(0.12, 0.25, 0.13), Vector3(0.15, 0.19, 0.15), Vector3(0.14, 0.13, 0.13), 0.045],
+	]
+	for i in locks.size():
+		var lock: Array = locks[i]
+		var tuft := _m(head, _hair_lock(lock[0], lock[1], lock[2], lock[3]), lighter if i % 4 == 0 else hair, Vector3(0, 0.098, 0))
+		tuft.scale.y = 0.67
+
+
+## Sculpted limb profiles overlap at articulation points to avoid toy-like balls.
+static func _limb(length: float, radius: float, forearm: bool = false) -> ArrayMesh:
+	var rings: Array[Vector3] = []
+	var radii := [0.20, 0.73, 1.0, 0.96, 0.82, 0.70, 0.65, 0.42]
+	if forearm:
+		radii = [0.55, 0.84, 1.0, 0.96, 0.80, 0.65, 0.52, 0.38]
+	for i in radii.size():
+		var t := float(i) / (radii.size() - 1)
+		var r: float = radius * radii[i]
+		rings.append(Vector3(r, -length * t + 0.025, r * 0.9))
+	return _profile(rings)
+
+
+static func _eye_leaf() -> ArrayMesh:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in 40:
+		var a := TAU * i / 40.0
+		var b := TAU * (i + 1) / 40.0
+		st.add_vertex(Vector3(0, 0, -0.018))
+		st.add_vertex(Vector3(cos(b) * 0.041, sin(b) * 0.020, -0.009))
+		st.add_vertex(Vector3(cos(a) * 0.041, sin(a) * 0.020, -0.009))
+	st.generate_normals()
+	return st.commit()
+
+
+static func _nose_mesh() -> ArrayMesh:
+	var points: Array[Vector3] = [Vector3(0, 0.202, -0.174), Vector3(-0.027, 0.145, -0.180), Vector3(-0.023, 0.137, -0.215), Vector3(0, 0.145, -0.235), Vector3(0.023, 0.137, -0.215), Vector3(0.027, 0.145, -0.180), Vector3(0, 0.124, -0.187)]
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in [0, 2, 1, 0, 3, 2, 0, 4, 3, 0, 5, 4, 2, 6, 1, 2, 3, 6, 3, 4, 6, 4, 5, 6]:
+		st.add_vertex(points[i])
+	st.index()
+	st.generate_normals()
+	return st.commit()
+
+
 func _build() -> void:
-	skin_mat = Palette.mat(Palette.GOBLIN_SKIN, 0.8).duplicate()
-	var ear_inner := Palette.mat(Color(0.74, 0.47, 0.36), 0.85)
-	var nose_mat := Palette.mat(Color(0.66, 0.44, 0.27), 0.85)
-	var vest := Palette.mat(Color(0.55, 0.38, 0.22), 0.95)
-	var vest_dark := Palette.mat(Color(0.43, 0.29, 0.17), 0.95)
-	var strap := Palette.mat(Color(0.30, 0.19, 0.12), 0.8)
-	var bracer := Palette.mat(Color(0.36, 0.23, 0.14), 0.85)
-	var boot := Palette.mat(Color(0.40, 0.26, 0.16), 0.9)
-	var boot_dark := Palette.mat(Color(0.27, 0.17, 0.10), 0.9)
-	var buckle := Palette.mat(Color(0.55, 0.56, 0.58), 0.35)
-	var brow_mat := Palette.mat(Color(0.24, 0.15, 0.09), 0.9)
-	var eye_white := Palette.mat(Color(0.98, 0.96, 0.9), 0.4)
-	var iris := Palette.mat(Color(0.80, 0.48, 0.12), 0.35)
+	skin_mat = Palette.mat(Color(0.39, 0.43, 0.235), 0.8).duplicate()
+	skin_mat.diffuse_mode = BaseMaterial3D.DIFFUSE_BURLEY
+	skin_mat.roughness = 0.88
+	var ear_inner := Palette.mat(Color(0.30, 0.34, 0.16), 0.85)
+	var nose_mat := Palette.mat(Color(0.36, 0.37, 0.19), 0.9).duplicate()
+	nose_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var brow_mat := Palette.mat(Color(0.11, 0.085, 0.055), 0.9)
+	var eye_white := Palette.mat(Color(0.78, 0.76, 0.63), 0.7).duplicate()
+	eye_white.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var iris := Palette.mat(Color(0.78, 0.36, 0.07), 0.7)
 	var iris_ring := Palette.mat(Color(0.42, 0.22, 0.06), 0.4)
-	var pupil := Palette.mat(Color(0.05, 0.03, 0.02), 0.3)
+	var pupil := Palette.mat(Color(0.05, 0.03, 0.02), 0.8)
 	var mouth := Palette.mat(Color(0.22, 0.09, 0.06), 0.9)
 	var tooth := Palette.mat(Color(0.96, 0.93, 0.80), 0.5)
 	var grip := Palette.mat(Color(0.42, 0.26, 0.15), 0.85)
 	var grip_dark := Palette.mat(Color(0.26, 0.16, 0.09), 0.85)
-	var gold := Palette.mat(Palette.GOLD, 0.45)
 	_blade_mat = Palette.mat(BLADE_STEEL, 0.35).duplicate()
 	_blade_mat.metallic = 0.35
 
@@ -195,86 +481,82 @@ func _build() -> void:
 	roll = _pivot(scale_root, "roll", Vector3(0, HIP_HEIGHT, 0))
 	hips = _pivot(roll, "hips", Vector3.ZERO)
 
-	# --- tunic skirt: flared, mid-thigh, split at the front ---
-	_m(hips, _fcyl(0.15, 0.19, 0.2, 9), vest, Vector3(0, -0.07, 0), Vector3.ZERO, Vector3(1.0, 1.0, 0.85))
-	_m(hips, _fbox(Vector3(0.02, 0.12, 0.012)), vest_dark, Vector3(0, -0.11, -0.142), Vector3(-11, 0, 0))  # front split
-
-	# --- legs: bare olive skin into chunky cuffed boots ---
+	# One opaque wrap, tied from its own cloth; no leather belt or buckle.
+	var cloth := Palette.mat(Color(0.30, 0.255, 0.18), 0.98)
+	_m(hips, _profile([Vector3(0.126, 0.025, 0.093), Vector3(0.15, -0.045, 0.11), Vector3(0.165, -0.155, 0.12)], true), cloth, Vector3.ZERO)
+	_m(hips, _fcyl(0.129, 0.13, 0.026), cloth, Vector3(0, 0.018, 0), Vector3.ZERO, Vector3(1, 1, 0.74))
+	_m(hips, _fsphere(0.024), cloth, Vector3(-0.105, 0.012, -0.065), Vector3.ZERO, Vector3(1, 0.65, 0.6))
+	_m(hips, _flat(_prism(Vector3(0.034, 0.078, 0.012))), cloth, Vector3(-0.113, -0.035, -0.08), Vector3(0, 0, -12))
 	for side in [-1, 1]:
-		var s := float(side)
-		var leg := _pivot(hips, "leg_l" if side < 0 else "leg_r", Vector3(0.085 * s, -0.04, 0))
-		_m(leg, _fcyl(0.06, 0.05, 0.2, 7), skin_mat, Vector3(0, -0.08, 0))
+		var sign_side := float(side)
+		var leg := _pivot(hips, "leg_l" if side < 0 else "leg_r", Vector3(0.079 * sign_side, -0.04, 0))
+		_m(leg, _limb(0.22, 0.060), skin_mat, Vector3.ZERO)
 		var shin := _pivot(leg, "shin_l" if side < 0 else "shin_r", Vector3(0, -0.17, 0))
-		_m(shin, _fcyl(0.048, 0.042, 0.12, 7), skin_mat, Vector3(0, -0.03, 0))
-		# boot shaft, folded cuff, foot and sole
-		_m(shin, _fcyl(0.068, 0.062, 0.13, 8), boot, Vector3(0, -0.13, 0))
-		_m(shin, _fcyl(0.082, 0.074, 0.05, 8), boot_dark, Vector3(0, -0.06, 0))
-		var foot := _m(shin, _fbox(Vector3(0.12, 0.08, 0.2)), boot, Vector3(0, -0.205, -0.045))
+		_m(shin, _limb(0.215, 0.044, true), skin_mat, Vector3.ZERO)
+		# Ankle pivot keeps the sole flat on the ground while the leg angles.
+		var ankle := _pivot(shin, "foot_l" if side < 0 else "foot_r", Vector3(0, -0.165, 0))
+		var foot := _m(ankle, _fsphere(0.065), skin_mat, Vector3(0, -0.015, -0.034), Vector3.ZERO, Vector3(0.82, 0.48, 1.45))
 		foot.name = "Foot"
-		_m(shin, _fsphere(0.062, 8, 5), boot, Vector3(0, -0.2, -0.13), Vector3.ZERO, Vector3(1.0, 0.65, 0.8))  # rounded toe
-		_m(shin, _fbox(Vector3(0.13, 0.03, 0.25)), boot_dark, Vector3(0, -0.245, -0.055))  # sole
+		for toe in 3:
+			_m(ankle, _fsphere(0.016), skin_mat, Vector3((float(toe) - 1.0) * 0.028, -0.017, -0.113), Vector3.ZERO, Vector3(0.85, 0.65, 1.25))
 		if side < 0:
 			leg_l = leg
 			shin_l = shin
+			foot_l = ankle
 		else:
 			leg_r = leg
 			shin_r = shin
+			foot_r = ankle
 
-	# --- torso: sleeveless vest, V-shaped (broad chest, narrow waist) ---
 	torso = _pivot(hips, "torso", Vector3(0, 0.02, 0))
-	_m(torso, _fcyl(0.17, 0.145, 0.27, 9), vest, Vector3(0, 0.15, 0), Vector3.ZERO, Vector3(1.0, 1.0, 0.78))
-	_m(torso, _fsphere(0.15, 9, 6), vest, Vector3(0, 0.25, 0), Vector3.ZERO, Vector3(1.12, 0.55, 0.82))  # shoulders
-	_m(torso, _fcyl(0.06, 0.07, 0.08, 7), skin_mat, Vector3(0, 0.33, 0))  # neck
-	# belt with a square steel buckle
-	_m(torso, _fcyl(0.158, 0.155, 0.05, 10), strap, Vector3(0, 0.025, 0), Vector3.ZERO, Vector3(1.0, 1.0, 0.82))
-	_buckle(torso, Vector3(0, 0.025, -0.13), 0.055, buckle, strap)
-	# diagonal strap from the right shoulder to the left hip, front and back
-	_m(torso, _fbox(Vector3(0.04, 0.36, 0.018)), strap, Vector3(0.0, 0.17, -0.12), Vector3(-6, 0, 36))
-	_m(torso, _fbox(Vector3(0.04, 0.36, 0.018)), strap, Vector3(0.0, 0.17, 0.12), Vector3(6, 0, -36))
-	_m(torso, _fbox(Vector3(0.045, 0.03, 0.26)), strap, Vector3(0.115, 0.31, 0.0))  # over the shoulder
-	_buckle(torso, Vector3(0.035, 0.205, -0.13), 0.045, buckle, strap, -36.0)
+	_m(torso, _profile([Vector3(0.12, 0.0, 0.085), Vector3(0.113, 0.09, 0.077), Vector3(0.15, 0.21, 0.096), Vector3(0.173, 0.265, 0.09), Vector3(0.10, 0.307, 0.062)]), skin_mat, Vector3.ZERO)
+	_m(torso, _profile([Vector3(0.085, 0.28, 0.063), Vector3(0.064, 0.32, 0.055), Vector3(0.061, 0.38, 0.052)]), skin_mat, Vector3.ZERO)
 
-	# --- head: big, bald, faceted ---
-	head = _pivot(torso, "head", Vector3(0, 0.33, 0))
-	_m(head, _fsphere(0.2, 12, 8), skin_mat, Vector3(0, 0.18, 0.01), Vector3.ZERO, Vector3(1.0, 1.04, 0.98))
-	_m(head, _fsphere(0.15, 10, 6), skin_mat, Vector3(0, 0.085, -0.045), Vector3.ZERO, Vector3(1.08, 0.78, 0.95))  # jaw & cheeks
-	var highlight := Palette.glow(Color(1, 1, 1), 1.2)
+	# --- reference-inspired angular head and swept dark hair ---
+	head = _pivot(torso, "head", Vector3(0, 0.365, 0))
+	head.scale = Vector3(0.83, 0.77, 0.80)
+	_m(head, _head_mesh(), skin_mat, Vector3.ZERO)
+	_build_hair()
+	_m(head, _nose_mesh(), nose_mat, Vector3.ZERO)
+	var highlight := Palette.mat(Color(1, 0.99, 0.94), 0.18)
 	for side in [-1, 1]:
 		var s := float(side)
 		# big amber anime eyes: whites, dark iris ring, iris, pupil, highlights.
 		# The eye pivot scales on Y for blinks / squints.
-		var eye := _pivot(head, "eye_l" if side < 0 else "eye_r", Vector3(0.082 * s, 0.17, -0.163))
-		_m(eye, _sphere(0.058, 14), eye_white, Vector3.ZERO, Vector3.ZERO, Vector3(1.0, 1.08, 0.62))
-		_m(eye, _sphere(0.045, 12), iris_ring, Vector3(-0.004 * s, -0.004, -0.029), Vector3.ZERO, Vector3(1.0, 1.08, 0.45))
-		_m(eye, _sphere(0.039, 12), iris, Vector3(-0.004 * s, -0.004, -0.033), Vector3.ZERO, Vector3(1.0, 1.08, 0.45))
-		_m(eye, _sphere(0.021, 8), pupil, Vector3(-0.004 * s, -0.004, -0.047), Vector3.ZERO, Vector3(1.0, 1.1, 0.45))
-		_m(eye, _sphere(0.011, 6), highlight, Vector3(-0.016, 0.016, -0.054))
-		_m(eye, _sphere(0.006, 6), highlight, Vector3(0.01, -0.017, -0.053))
-		# thick dark brows
-		var brow := _pivot(head, "brow_l" if side < 0 else "brow_r", Vector3(0.082 * s, 0.26, -0.17))
-		_m(brow, _fbox(Vector3(0.1, 0.03, 0.04)), brow_mat, Vector3.ZERO)
+		var eye := _pivot(head, "eye_l" if side < 0 else "eye_r", Vector3(0.083 * s, 0.213, -0.15))
+		eye.scale = Vector3(1.0, 0.90, 1.0)
+		_m(eye, _eye_leaf(), eye_white, Vector3.ZERO)
+		_m(eye, _sphere(0.020, 28), iris, Vector3(-0.002 * s, 0, -0.020), Vector3.ZERO, Vector3(0.95, 0.82, 0.16))
+		_m(eye, _sphere(0.011, 24), pupil, Vector3(-0.002 * s, 0, -0.023), Vector3.ZERO, Vector3(0.9, 1.0, 0.18))
+		_m(eye, _sphere(0.003, 12), highlight, Vector3(-0.007, 0.006, -0.026))
+		_m(eye, _eyelid_mesh(s), skin_mat, Vector3.ZERO)
+		var brow := _pivot(head, "brow_l" if side < 0 else "brow_r", Vector3(0.083 * s, 0.255, -0.165))
+		_m(brow, _capsule(0.009, 0.089), brow_mat, Vector3.ZERO, Vector3(0, 0, 90), Vector3(1, 1, 0.55))
 		if side < 0:
 			_brow_l = brow
 		else:
 			_brow_r = brow
 		# huge ears swept out sideways and slightly up/back; brownish-pink inside
-		var ear := _pivot(head, "ear_l" if side < 0 else "ear_r", Vector3(0.17 * s, 0.19, 0.02))
+		var ear := _pivot(head, "ear_l" if side < 0 else "ear_r", Vector3(0.168 * s, 0.20, 0.005))
 		ear.rotation_degrees = Vector3(0, -18.0 * s, -76.0 * s)
-		_m(ear, _flat(_prism(Vector3(0.17, 0.36, 0.035))), skin_mat, Vector3(0, 0.17, 0))
-		_m(ear, _flat(_prism(Vector3(0.11, 0.26, 0.02))), ear_inner, Vector3(0, 0.15, -0.014))
-	# short triangular nose
-	_m(head, _flat(_prism(Vector3(0.07, 0.075, 0.05))), nose_mat, Vector3(0, 0.125, -0.2), Vector3(-14, 0, 0))
-	# mouth: a closed smirk with two lower fangs pointing up, and an open mouth, swapped by expression
+		var outer_ear := skin_mat.duplicate() as StandardMaterial3D
+		outer_ear.cull_mode = BaseMaterial3D.CULL_DISABLED
+		ear_inner.cull_mode = BaseMaterial3D.CULL_DISABLED
+		_m(ear, _ear_mesh(), outer_ear, Vector3.ZERO)
+		_m(ear, _ear_mesh(true), ear_inner, Vector3.ZERO)
+	# Mouth follows the muzzle curvature; the nose is part of the head surface.
 	_mouth_closed = Node3D.new()
-	_mouth_closed.position = Vector3(0, 0.06, -0.185)
+	_mouth_closed.position = Vector3(0, 0.082, -0.157)
 	head.add_child(_mouth_closed)
-	_m(_mouth_closed, _box(Vector3(0.1, 0.014, 0.02)), mouth, Vector3(0, 0, 0))
-	_m(_mouth_closed, _box(Vector3(0.03, 0.013, 0.02)), mouth, Vector3(0.062, 0.007, 0.004), Vector3(0, 0, 22))
-	_m(_mouth_closed, _box(Vector3(0.03, 0.013, 0.02)), mouth, Vector3(-0.062, 0.007, 0.004), Vector3(0, 0, -22))
+	for i in 12:
+		var x := -0.056 + float(i) * 0.0093
+		var y := -0.003 * pow(x / 0.056, 2.0) + 0.015 * x
+		var depth := -_face_depth(x, 0.082 + y) + 0.155
+		_m(_mouth_closed, _capsule(0.002, 0.012), mouth, Vector3(x, y, depth), Vector3(0, 0, 90))
 	for side in [-1, 1]:
-		_m(_mouth_closed, _flat(_prism(Vector3(0.026, 0.045, 0.018))), tooth, Vector3(0.042 * float(side), 0.024, -0.006))
+		_m(_mouth_closed, _cyl(0.001, 0.006, 0.017, 10), tooth, Vector3(0.041 * side, 0.003, -0.002), Vector3(0, 0, -12 * side))
 	_mouth_open = Node3D.new()
-	_mouth_open.position = Vector3(0, 0.06, -0.178)
+	_mouth_open.position = Vector3(0, 0.082, -0.16)
 	head.add_child(_mouth_open)
 	_m(_mouth_open, _sphere(0.045, 12), mouth, Vector3.ZERO, Vector3.ZERO, Vector3(1.3, 0.75, 0.5))
 	for side in [-1, 1]:
@@ -284,15 +566,14 @@ func _build() -> void:
 	# --- arms: bare olive skin, leather bracers, big hands ---
 	for side in [-1, 1]:
 		var s := float(side)
-		var arm := _pivot(torso, "arm_l" if side < 0 else "arm_r", Vector3(0.19 * s, 0.26, 0))
-		_m(arm, _fsphere(0.058, 8, 5), skin_mat, Vector3(0, -0.01, 0))  # shoulder
-		_m(arm, _fcyl(0.05, 0.042, 0.17, 7), skin_mat, Vector3(0, -0.085, 0))
+		var arm := _pivot(torso, "arm_l" if side < 0 else "arm_r", Vector3(0.158 * s, 0.26, 0))
+		_m(arm, _limb(0.20, 0.055), skin_mat, Vector3.ZERO)
 		var fore := _pivot(arm, "fore_l" if side < 0 else "fore_r", Vector3(0, -0.165, 0))
-		_m(fore, _fcyl(0.047, 0.04, 0.16, 7), skin_mat, Vector3(0, -0.07, 0))
-		_m(fore, _fcyl(0.056, 0.052, 0.075, 8), bracer, Vector3(0, -0.115, 0))  # thick bracer
-		_m(fore, _fcyl(0.059, 0.059, 0.014, 8), strap, Vector3(0, -0.095, 0))
-		_m(fore, _fsphere(0.056, 8, 6), skin_mat, Vector3(0, -0.18, 0), Vector3.ZERO, Vector3(0.95, 1.0, 1.15))  # fist
-		_m(fore, _fsphere(0.024, 6, 4), skin_mat, Vector3(-0.04 * s, -0.17, -0.03))  # thumb
+		_m(fore, _limb(0.19, 0.044, true), skin_mat, Vector3.ZERO)
+		_m(fore, _fsphere(0.038, 14, 10), skin_mat, Vector3(0, -0.178, 0), Vector3.ZERO, Vector3(0.92, 1.05, 0.78))
+		for finger in 3:
+			_m(fore, _fsphere(0.013, 12, 8), skin_mat, Vector3((float(finger) - 1) * 0.021, -0.194, -0.017), Vector3.ZERO, Vector3(0.95, 1.0, 0.95))
+		_m(fore, _capsule(0.015, 0.038), skin_mat, Vector3(-0.026 * s, -0.177, -0.019), Vector3(-15, 0, 22 * s))
 		if side < 0:
 			arm_l = arm
 			fore_l = fore
@@ -300,40 +581,35 @@ func _build() -> void:
 			arm_r = arm
 			fore_r = fore
 
-	# --- faceted steel short sword in the right hand (blade along -Z of the sword pivot) ---
+	# Keep the sword joint API for existing animations; the starting mesh is a knife.
 	sword = _pivot(fore_r, "sword", Vector3(0, -0.18, 0))
-	_m(sword, _fcyl(0.019, 0.019, 0.12, 6), grip, Vector3(0, 0, 0.0), Vector3(90, 0, 0))
-	for i in 3:
-		_m(sword, _fcyl(0.022, 0.022, 0.012, 6), grip_dark, Vector3(0, 0, -0.04 + 0.04 * float(i)), Vector3(90, 0, 0))
-	_m(sword, _fcyl(0.0, 0.03, 0.05, 6), _blade_mat, Vector3(0, 0, 0.085), Vector3(-90, 0, 0))  # faceted pommel
-	_m(sword, _fbox(Vector3(0.17, 0.035, 0.035)), _blade_mat, Vector3(0, 0, -0.065))  # square crossguard
+	_knife_node = Node3D.new()
+	_knife_node.name = "Knife"
+	sword.add_child(_knife_node)
+	_m(_knife_node, _fcyl(0.016, 0.019, 0.09, 8), grip_dark, Vector3(0, 0, 0.014), Vector3(90, 0, 0))
+	for i in 5:
+		_m(_knife_node, _fcyl(0.02, 0.02, 0.009, 8), grip, Vector3(0, 0, -0.02 + 0.016 * float(i)), Vector3(90, 0, 12))
 	blade_root = Node3D.new()
 	blade_root.name = "BladeRoot"
-	blade_root.position = Vector3(0, 0, -0.08)
-	sword.add_child(blade_root)
-	# diamond cross-section blade + pointed tip
-	_m(blade_root, _fcyl(0.034, 0.038, 0.38, 4), _blade_mat, Vector3(0, 0, -0.19), Vector3(90, 0, 0), Vector3(1.0, 1.0, 0.3))
-	_m(blade_root, _fcyl(0.0, 0.034, 0.1, 4), _blade_mat, Vector3(0, 0, -0.43), Vector3(-90, 0, 0), Vector3(1.0, 1.0, 0.3))
-
-	# --- hobgoblin armour (hidden until evolution) ---
-	var pad_mat := Palette.mat(Palette.STEEL.darkened(0.25), 0.45)
-	var pad := Node3D.new()
-	arm_r.add_child(pad)
-	_m(pad, _fsphere(0.1, 10, 6), pad_mat, Vector3(0.02, 0.0, 0), Vector3(0, 0, -20), Vector3(1.0, 0.7, 1.05))
-	_m(pad, _sphere(0.02, 6), gold, Vector3(0.09, 0.03, 0))
-	armour.append(pad)
-	var pad_l := Node3D.new()
-	arm_l.add_child(pad_l)
-	_m(pad_l, _fsphere(0.085, 10, 6), Palette.mat(Palette.LEATHER.darkened(0.1), 0.7), Vector3(-0.015, 0.0, 0), Vector3(0, 0, 20), Vector3(1.0, 0.65, 1.0))
-	armour.append(pad_l)
-	var chest := Node3D.new()
-	torso.add_child(chest)
-	_m(chest, _fcyl(0.178, 0.155, 0.2, 9), Palette.mat(Palette.LEATHER.darkened(0.15), 0.7), Vector3(0, 0.16, 0), Vector3.ZERO, Vector3(1.03, 1, 0.84))
-	for i in 3:
-		_m(chest, _sphere(0.016, 6), gold, Vector3(-0.05 + 0.05 * float(i), 0.2, -0.15))
-	armour.append(chest)
-	for a in armour:
-		a.visible = false
+	blade_root.position = Vector3(0, 0, -0.035)
+	_knife_node.add_child(blade_root)
+	# Irregular double-bevel outline, including a chipped cutting edge.
+	var outline: Array[Vector2] = [Vector2(-0.024, 0), Vector2(0.025, 0), Vector2(0.031, -0.07), Vector2(0.017, -0.084), Vector2(0.026, -0.094), Vector2(0.018, -0.16), Vector2(-0.009, -0.21), Vector2(-0.025, -0.125)]
+	var blade := SurfaceTool.new()
+	blade.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for side in [-1.0, 1.0]:
+		var ridge := Vector3(0, 0.009 * side, -0.085)
+		for i in outline.size():
+			var a := outline[i]
+			var b := outline[(i + 1) % outline.size()]
+			blade.add_vertex(ridge)
+			blade.add_vertex(Vector3(a.x, 0, a.y) if side > 0 else Vector3(b.x, 0, b.y))
+			blade.add_vertex(Vector3(b.x, 0, b.y) if side > 0 else Vector3(a.x, 0, a.y))
+	blade.generate_normals()
+	_blade_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_blade_mat.albedo_color = Color(0.36, 0.38, 0.34)
+	_blade_mat.roughness = 0.87
+	_m(blade_root, blade.commit(), _blade_mat, Vector3.ZERO)
 
 
 ## Square steel buckle: a frame with the strap showing through the middle.
@@ -352,7 +628,7 @@ func set_stage(p_stage: StringName, animate: bool = true) -> void:
 	stage = p_stage
 	var evolved := p_stage != &"goblin"
 	var target_scale: float = STAGE_SCALE.get(p_stage, 1.3 if evolved else 1.0)
-	var skin_col := Palette.HOBGOBLIN_SKIN if evolved else Palette.GOBLIN_SKIN
+	var skin_col := Palette.HOBGOBLIN_SKIN if evolved else Color(0.39, 0.43, 0.235)
 	var blade_col := Palette.STEEL.darkened(0.08) if evolved else BLADE_STEEL
 	var blade_scale := Vector3(1.3, 1.2, 1.45) if evolved else Vector3.ONE
 	var body_scale := Vector3(target_scale * 1.06, target_scale, target_scale * 1.06) if evolved else Vector3.ONE * target_scale
@@ -364,7 +640,7 @@ func set_stage(p_stage: StringName, animate: bool = true) -> void:
 		_blade_mat.albedo_color = blade_col
 		blade_root.scale = blade_scale
 		for a in armour:
-			a.visible = evolved
+			a.visible = false
 		return
 	_flash()
 	_scale_tween = create_tween()
@@ -375,7 +651,7 @@ func set_stage(p_stage: StringName, animate: bool = true) -> void:
 	_scale_tween.tween_property(blade_root, "scale", blade_scale, 0.5).set_delay(0.25)
 	_scale_tween.tween_callback(func() -> void:
 		for a in armour:
-			a.visible = evolved).set_delay(0.25)
+			a.visible = false).set_delay(0.25)
 	# skin glow pulse
 	skin_mat.emission_enabled = true
 	skin_mat.emission = Palette.ESSENCE
@@ -404,8 +680,16 @@ func _flash() -> void:
 
 
 # =============================================================== reactions
-func flinch(strength: float = 1.0) -> void:
+## Direction-aware light flinch (no state change). dir: x = hit from the right,
+## y = hit from the front (body space).
+func flinch(strength: float = 1.0, dir: Vector2 = Vector2(0, 1)) -> void:
 	_flinch = maxf(_flinch, clampf(strength, 0.0, 1.0))
+	_flinch_dir = dir
+
+
+## A blocked hit pushes the guard back into the body.
+func guard_impact(strength: float = 1.0) -> void:
+	_block_hit = maxf(_block_hit, clampf(strength, 0.0, 1.0))
 
 
 func land(impact: float) -> void:
@@ -415,6 +699,9 @@ func land(impact: float) -> void:
 func reset_pose() -> void:
 	_flinch = 0.0
 	_squash = 0.0
+	_block_hit = 0.0
+	_ik.clear()
+	_ik_w.clear()
 	for j: Node3D in _joints.values():
 		if j.name.begins_with("ear"):
 			continue
@@ -423,6 +710,21 @@ func reset_pose() -> void:
 
 
 # =============================================================== animation
+## States in which the support foot (or knee) is pinned to the ground and the
+## sole is kept flat; hip height is solved from the leg pose, not authored.
+const PLANTED_STATES: Array[StringName] = [&"idle", &"attack", &"block", &"cast", &"hurt"]
+## States animated purely with FK (rolls, falls): weapon IK fades out.
+const FK_ONLY_STATES: Array[StringName] = [&"dodge", &"backstep", &"dash", &"dead"]
+const ARM_UPPER := 0.165
+const ARM_LOWER := 0.178
+const SOLE_DROP := 0.046        # ankle pivot -> sole
+const KNEE_DROP := 0.042        # knee pivot -> kneecap surface
+const POLE_R := Vector3(0.7, -1.0, 0.45)
+const POLE_L := Vector3(-0.7, -1.0, 0.45)
+
+var _ik_w: Dictionary = {}      # channel -> blend weight
+
+
 func _process(delta: float) -> void:
 	if roll == null:
 		return
@@ -433,11 +735,11 @@ func _process(delta: float) -> void:
 		rate = 38.0
 	elif anim_state == &"dead":
 		rate = 7.0
-	elif anim_state == &"hurt":
+	elif anim_state == &"hurt" or anim_state == &"cast":
 		rate = 24.0
 	var k := 1.0 - exp(-rate * delta)
 	for n: String in pose:
-		if n == "hip_y" or n == "roll_x":
+		if n == "hip_y" or n == "roll_x" or n in ChoreoPose.IK_CHANNELS:
 			continue
 		var j: Node3D = _joints.get(n)
 		if j:
@@ -453,14 +755,142 @@ func _process(delta: float) -> void:
 		roll.rotation.x = roll_x
 	else:
 		roll.rotation.x = lerpf(wrapf(roll.rotation.x, -PI, PI), roll_x, k)
-	var hip_y: float = HIP_HEIGHT + float(pose.get("hip_y", 0.0))
-	roll.position.y = lerpf(roll.position.y, hip_y, k)
-	# squash on landing
 	_squash = move_toward(_squash, 0.0, delta * 5.0)
 	_flinch = move_toward(_flinch, 0.0, delta * 5.0)
+	_block_hit = move_toward(_block_hit, 0.0, delta * 4.0)
 	var sq := _squash * _squash
 	hips.scale = Vector3(1.0 + sq * 0.12, 1.0 - sq * 0.18, 1.0 + sq * 0.12)
+	_plant_feet(pose, k, delta)
+	_apply_ik(pose, k, delta)
+	_update_sling(delta)
 	_update_face(delta)
+
+
+func _is_planted() -> bool:
+	return anim_grounded and anim_state in PLANTED_STATES
+
+
+## Solves hip height so the lowest sole/knee touches the ground and flattens the
+## supporting feet. Authored "hip_y" is only used in unplanted states.
+func _plant_feet(pose: Dictionary, k: float, delta: float) -> void:
+	var inv := roll.global_transform.affine_inverse()
+	var ankles := [(inv * foot_l.global_transform.origin).y, (inv * foot_r.global_transform.origin).y]
+	var lowest_sole := minf(ankles[0], ankles[1]) - SOLE_DROP
+	var lowest := lowest_sole
+	for sh: Node3D in [shin_l, shin_r]:
+		lowest = minf(lowest, (inv * sh.global_transform.origin).y - KNEE_DROP)
+	var planted := _is_planted()
+	if planted:
+		roll.position.y = lerpf(roll.position.y, -lowest, 1.0 - exp(-30.0 * delta))
+	else:
+		var hip_y: float = HIP_HEIGHT + float(pose.get("hip_y", 0.0))
+		roll.position.y = lerpf(roll.position.y, hip_y, k)
+	var walking := anim_state == &"move" and anim_grounded
+	for i in 2:
+		var f: Node3D = foot_l if i == 0 else foot_r
+		var leg: Node3D = leg_l if i == 0 else leg_r
+		var shin: Node3D = shin_l if i == 0 else shin_r
+		var tilt := hips.rotation.x + leg.rotation.x + shin.rotation.x
+		var w := 0.0
+		if planted:
+			w = 1.0 if float(ankles[i]) - SOLE_DROP - lowest_sole < 0.04 else 0.3
+		elif walking:
+			w = 0.45
+		var want := Vector3(-tilt * w, 0, 0)
+		var key := "foot_l" if i == 0 else "foot_r"
+		if pose.has(key):
+			want += pose[key] as Vector3
+		f.rotation = f.rotation.lerp(want, k)
+
+
+func _apply_ik(pose: Dictionary, k: float, delta: float) -> void:
+	var fk_only := anim_state in FK_ONLY_STATES
+	for ch: String in ChoreoPose.IK_CHANNELS:
+		var present := pose.has(ch) and not fk_only
+		if present:
+			var v: Vector3 = pose[ch]
+			_ik[ch] = ChoreoPose.lerp_joint(ch, _ik[ch], v, k) if _ik.has(ch) else v
+		_ik_w[ch] = move_toward(float(_ik_w.get(ch, 0.0)), 1.0 if present else 0.0, delta * 9.0)
+		if float(_ik_w[ch]) <= 0.0:
+			_ik.erase(ch)
+	if _ik.has("hand_r"):
+		_solve_arm(arm_r, fore_r, _ik["hand_r"], POLE_R, float(_ik_w["hand_r"]))
+	if _ik.has("hand_l"):
+		_solve_arm(arm_l, fore_l, _ik["hand_l"], POLE_L, float(_ik_w["hand_l"]))
+	if _ik.has("aim"):
+		_solve_wrist(_ik["aim"], _ik.get("edge", Vector3.DOWN), float(_ik_w["aim"]))
+
+
+## Two-bone IK toward a hips-space target; blends over the FK result by w.
+func _solve_arm(arm: Node3D, fore: Node3D, target_hips: Vector3, pole: Vector3, w: float) -> float:
+	var inv := torso.global_transform.affine_inverse()
+	var t := inv * (hips.global_transform * target_hips)
+	var res := ChoreoIK.two_bone(arm.position, t, ARM_UPPER, ARM_LOWER, pole)
+	if w >= 0.999:
+		arm.rotation = res[0]
+		fore.rotation = Vector3(res[1], 0, 0)
+	else:
+		arm.basis = arm.basis.orthonormalized().slerp(Basis.from_euler(res[0]), w)
+		fore.rotation = fore.rotation.lerp(Vector3(res[1], 0, 0), w)
+	return res[2]
+
+
+## Orients the grip socket so the weapon axis follows "aim" and the edge faces
+## "edge" (both hips space).
+func _solve_wrist(aim_hips: Vector3, edge_hips: Vector3, w: float) -> void:
+	var hb := hips.global_transform.basis.orthonormalized()
+	var a := (hb * aim_hips).normalized()
+	var e := hb * edge_hips
+	e -= a * e.dot(a)
+	if e.length_squared() < 1e-5:
+		e = hb * Vector3.DOWN
+		e -= a * e.dot(a)
+	e = e.normalized()
+	var z := -a
+	var y := -e
+	var desired := Basis(y.cross(z), y, z)
+	var local := fore_r.global_transform.basis.orthonormalized().inverse() * desired
+	sword.basis = local if w >= 0.999 else sword.basis.orthonormalized().slerp(local, w)
+
+
+## Sling cords: hang under gravity, whirl during the wind-up, whip at release.
+func _update_sling(delta: float) -> void:
+	if _sling_arm == null or not _sling_arm.is_visible_in_tree():
+		return
+	var dir := Vector3(0.0, -1.0, 0.04)
+	var spun := false
+	var stone_visible := true
+	if anim_state == &"attack" and anim_move.has("spin"):
+		var spin: Dictionary = anim_move["spin"]
+		var ph := anim_phase
+		if ph < 1.0:
+			var a := TAU * float(spin.get("turns", 1.0)) * pow(ph, 1.3)
+			if spin.get("plane", &"side") == &"overhead":
+				dir = Vector3(sin(a), -0.3, -cos(a))
+			else:
+				dir = Vector3(0.15, -cos(a), -sin(a))
+			spun = true
+		elif ph < 2.0:
+			dir = Vector3(0.05, 0.25, -1.0).lerp(Vector3(-0.1, -0.5, -1.0), ph - 1.0)
+			spun = true
+			stone_visible = false
+		else:
+			stone_visible = ph >= 2.9
+	if spun:
+		_sling_dir = dir.normalized()
+	elif _sling_dir.dot(dir.normalized()) > -0.99:
+		_sling_dir = _sling_dir.slerp(dir.normalized(), 1.0 - exp(-10.0 * delta))
+	else:
+		_sling_dir = dir.normalized()
+	var world := (global_transform.basis.orthonormalized() * _sling_dir).normalized()
+	var y := -world
+	var ref := Vector3.UP if absf(y.dot(Vector3.UP)) < 0.95 else Vector3.FORWARD
+	var x := ref.cross(y).normalized()
+	var sc := _sling_arm.global_basis.get_scale()
+	_sling_arm.global_basis = Basis(x, y, x.cross(y)).scaled(sc)
+	var stone := _sling_arm.get_node_or_null("Stone") as Node3D
+	if stone:
+		stone.visible = stone_visible
 
 
 ## Expression from state: neutral (blinking), determined (attacks/block/dash),
@@ -488,25 +918,26 @@ func _update_face(delta: float) -> void:
 	if _brow_l == null:
 		return
 	var expr := current_expression()
-	var eye_y := 1.0
+	var eye_y := 0.90
 	var brow_z := NEUTRAL_BROW_Z  # positive = angry (inner ends down)
-	var brow_y := 0.26
+	var brow_y := 0.255
 	var open := false
 	match expr:
 		&"determined":
-			eye_y = 0.78
+			eye_y = 0.62
 			brow_z = 0.42
-			brow_y = 0.248
-			open = anim_state == &"attack" and anim_phase >= 0.9 and anim_phase < 2.4
+			brow_y = 0.245
+			# Mouth stays closed in attacks (exaggerated attack teeth were rejected).
+			open = false
 		&"wince":
 			eye_y = 0.22
 			brow_z = -0.32
-			brow_y = 0.245
+			brow_y = 0.243
 			open = true
 		&"surprised":
-			eye_y = 1.12
+			eye_y = 0.85
 			brow_z = -0.15
-			brow_y = 0.278
+			brow_y = 0.268
 			open = true
 		&"ko":
 			eye_y = 0.08
@@ -515,7 +946,7 @@ func _update_face(delta: float) -> void:
 		&"happy":
 			eye_y = 0.6
 			brow_z = -0.2
-			brow_y = 0.272
+			brow_y = 0.262
 	# blinking (neutral / happy only)
 	_next_blink -= delta
 	if _next_blink <= 0.0:
@@ -535,15 +966,17 @@ func _update_face(delta: float) -> void:
 	_mouth_closed.visible = not open
 
 
+## Rest = relaxed base + the equipped moveset's carry overlay + breathing.
 func _rest_combat(out: Dictionary) -> void:
 	var breathe := sin(_time * 2.2)
+	out.clear()
 	out["hips"] = Vector3.ZERO
-	out["torso"] = Vector3(0.04 + breathe * 0.025, 0, 0)
-	out["head"] = Vector3(-0.03 - breathe * 0.02, 0, 0)
-	out["arm_l"] = Vector3(0.1, 0, -0.18 - breathe * 0.03)
-	out["fore_l"] = Vector3(0.35, 0, 0)
-	out["arm_r"] = Vector3(0.25, 0, 0.2 + breathe * 0.03)
-	out["fore_r"] = Vector3(0.75, 0, 0)
+	out["torso"] = Vector3(0.04, 0, 0)
+	out["head"] = Vector3(-0.03, 0, 0)
+	out["arm_l"] = Vector3(0.03, 0, -0.16)
+	out["fore_l"] = Vector3(0.16, 0, 0)
+	out["arm_r"] = Vector3(0.03, 0, 0.16)
+	out["fore_r"] = Vector3(0.18, 0, 0)
 	out["sword"] = Vector3(-0.35, 0, 0)
 	out["leg_l"] = Vector3(0.05, 0, -0.04)
 	out["shin_l"] = Vector3(-0.08, 0, 0)
@@ -551,6 +984,15 @@ func _rest_combat(out: Dictionary) -> void:
 	out["shin_r"] = Vector3(-0.08, 0, 0)
 	out["hip_y"] = -0.005 + breathe * 0.004
 	out["roll_x"] = 0.0
+	var carry: Dictionary = active_moveset().get("carry", {})
+	for j: String in carry:
+		out[j] = carry[j]
+	out["torso"] = (out["torso"] as Vector3) + Vector3(breathe * 0.025, 0, 0)
+	out["head"] = (out["head"] as Vector3) + Vector3(-breathe * 0.02, 0, 0)
+	out["arm_l"] = (out["arm_l"] as Vector3) + Vector3(0, 0, -breathe * 0.02)
+	out["arm_r"] = (out["arm_r"] as Vector3) + Vector3(0, 0, breathe * 0.02)
+	if out.has("hand_r"):
+		out["hand_r"] = (out["hand_r"] as Vector3) + Vector3(0, breathe * 0.004, 0)
 
 
 func _target_pose(delta: float) -> Dictionary:
@@ -579,30 +1021,22 @@ func _target_pose(delta: float) -> Dictionary:
 			p["hip_y"] = -0.06
 		&"block":
 			_locomotion(p, delta, 0.4)
-			p["torso"] = Vector3(0.18, 0, 0)
-			p["head"] = Vector3(-0.12, 0, 0)
-			p["arm_r"] = Vector3(1.25, 0, -0.35)
-			p["fore_r"] = Vector3(0.95, 0, 0)
-			p["sword"] = Vector3(0, 1.45, 0)
-			p["arm_l"] = Vector3(1.0, 0, 0.25)
-			p["fore_l"] = Vector3(1.35, 0, 0)
-			p["hip_y"] = float(p["hip_y"]) - 0.05
+			var guard: Dictionary = active_moveset().get("guard", {}).get("pose", {})
+			for j: String in guard:
+				p[j] = guard[j]
+			if _block_hit > 0.0:
+				var b := _block_hit
+				p["torso"] = (p["torso"] as Vector3) + Vector3(-0.22 * b, 0, 0)
+				p["head"] = (p["head"] as Vector3) + Vector3(-0.15 * b, 0, 0)
+				p["arm_l"] = (p["arm_l"] as Vector3) + Vector3(-0.25 * b, 0, 0)
+				p["arm_r"] = (p["arm_r"] as Vector3) + Vector3(-0.25 * b, 0, 0)
+				if p.has("hand_r"):
+					p["hand_r"] = (p["hand_r"] as Vector3) + Vector3(0, -0.02, 0.07) * b
+				p["leg_r"] = (p["leg_r"] as Vector3) + Vector3(-0.15 * b, 0, 0)
 		&"hurt":
-			p["torso"] = Vector3(-0.38, 0.15, 0)
-			p["head"] = Vector3(-0.3, 0, 0.1)
-			p["arm_l"] = Vector3(0.7, 0, -0.65)
-			p["arm_r"] = Vector3(0.7, 0, 0.65)
-			p["fore_l"] = Vector3(0.6, 0, 0)
-			p["hip_y"] = -0.04
+			_hurt(p)
 		&"cast":
-			var e := clampf(anim_t * 4.0, 0.0, 1.0)
-			p["torso"] = Vector3(0.12, 0.3 * e, 0)
-			p["arm_l"] = Vector3(1.55 * e, -0.2, -0.1)
-			p["fore_l"] = Vector3(0.0, 0, 0)
-			p["arm_r"] = Vector3(0.1, 0, 0.45)
-			p["leg_l"] = Vector3(0.35, 0, 0)
-			p["leg_r"] = Vector3(-0.3, 0, 0)
-			p["hip_y"] = -0.03
+			_cast(p)
 		&"dash":
 			p["torso"] = Vector3(0.55, 0, 0)
 			p["head"] = Vector3(-0.35, 0, 0)
@@ -628,12 +1062,14 @@ func _target_pose(delta: float) -> Dictionary:
 			p["shin_l"] = Vector3(-0.5, 0, 0)
 	if _flinch > 0.0:
 		var f := _flinch
-		p["torso"] = (p["torso"] as Vector3) + Vector3(-0.3 * f, 0, 0)
-		p["head"] = (p["head"] as Vector3) + Vector3(-0.25 * f, 0, 0.1 * f)
+		var d := _flinch_dir
+		p["torso"] = (p["torso"] as Vector3) + Vector3(-0.3 * f * d.y, -0.18 * f * d.x, 0.16 * f * d.x)
+		p["head"] = (p["head"] as Vector3) + Vector3(-0.25 * f * d.y, 0, 0.1 * f)
 	return p
 
 
 func _locomotion(p: Dictionary, delta: float, amp_scale: float = 1.0) -> void:
+	var mv: Dictionary = active_moveset().get("move", {})
 	var spd := anim_speed
 	var sprint_k := 1.0 if anim_sprinting else 0.0
 	var run_k := clampf((spd - 2.4) / 2.8, 0.0, 1.0)
@@ -650,8 +1086,11 @@ func _locomotion(p: Dictionary, delta: float, amp_scale: float = 1.0) -> void:
 	var arm_amp := lerpf(0.35, 0.8, run_k) * amp_scale + sprint_k * 0.25
 	p["arm_l"] = Vector3(-arm_amp * s + 0.1, 0, -0.2)
 	p["fore_l"] = Vector3(0.4 + run_k * 0.6, 0, 0)
-	p["arm_r"] = Vector3(arm_amp * s * 0.7 + 0.3, 0, 0.22)
-	p["fore_r"] = Vector3(0.7 + run_k * 0.3, 0, 0)
+	p["arm_r"] = Vector3(arm_amp * s * float(mv.get("arm_r_swing", 0.7)) + float(mv.get("arm_r_bias", 0.3)), 0, 0.22)
+	p["fore_r"] = Vector3((mv.get("fore_r", Vector3(0.7, 0, 0)) as Vector3).x + run_k * 0.3, 0, 0)
+	if p.has("hand_r"):
+		var hs := float(mv.get("hand_swing", 0.05)) * amp_scale
+		p["hand_r"] = (p["hand_r"] as Vector3) + Vector3(0, 0.02 * run_k, -hs * s * (0.5 + run_k))
 	var lean := lerpf(0.06, 0.2, run_k) + sprint_k * 0.18
 	p["torso"] = Vector3(lean, -0.12 * s * run_k, 0)
 	p["head"] = Vector3(-lean * 0.7, 0.08 * s * run_k, 0)
@@ -686,65 +1125,101 @@ func _air(p: Dictionary) -> void:
 		p["head"] = Vector3(0.12, 0, 0)
 
 
-## Key poses for attacks: [windup, strike-end]. Joints omitted keep rest values.
-const ATTACK_KEYS := {
-	&"light1": [  # diagonal slash right -> left
-		{"torso": Vector3(0.0, -0.75, 0), "arm_r": Vector3(1.5, 0, 1.15), "fore_r": Vector3(0.7, 0, 0), "sword": Vector3(0, -0.3, 0),
-		"arm_l": Vector3(0.5, 0, -0.45), "leg_l": Vector3(0.3, 0, 0), "leg_r": Vector3(-0.25, 0, 0), "shin_r": Vector3(-0.3, 0, 0)},
-		{"torso": Vector3(0.22, 0.75, 0), "arm_r": Vector3(1.25, 0, -0.75), "fore_r": Vector3(0.15, 0, 0), "sword": Vector3(0, 0.6, 0),
-		"arm_l": Vector3(-0.3, 0, -0.6), "leg_l": Vector3(0.45, 0, 0), "shin_l": Vector3(-0.2, 0, 0), "leg_r": Vector3(-0.35, 0, 0), "hip_y": -0.04},
-	],
-	&"light2": [  # backhand left -> right
-		{"torso": Vector3(0.05, 0.85, 0), "arm_r": Vector3(1.55, 0, -0.95), "fore_r": Vector3(1.1, 0, 0), "sword": Vector3(0, 0.9, 0),
-		"arm_l": Vector3(0.2, 0, -0.3), "leg_r": Vector3(0.3, 0, 0), "leg_l": Vector3(-0.2, 0, 0)},
-		{"torso": Vector3(0.2, -0.7, 0), "arm_r": Vector3(1.35, 0, 1.25), "fore_r": Vector3(0.2, 0, 0), "sword": Vector3(0, -0.5, 0),
-		"arm_l": Vector3(0.5, 0, -0.7), "leg_r": Vector3(0.45, 0, 0), "shin_r": Vector3(-0.2, 0, 0), "leg_l": Vector3(-0.35, 0, 0), "hip_y": -0.04},
-	],
-	&"light3": [  # overhead chop
-		{"torso": Vector3(-0.3, 0, 0), "head": Vector3(0.15, 0, 0), "arm_r": Vector3(3.0, 0, 0.25), "fore_r": Vector3(0.7, 0, 0), "sword": Vector3(0.2, 0, 0),
-		"arm_l": Vector3(2.6, 0, -0.2), "fore_l": Vector3(0.6, 0, 0), "hip_y": 0.02},
-		{"torso": Vector3(0.5, 0, 0), "head": Vector3(-0.3, 0, 0), "arm_r": Vector3(0.9, 0, 0.05), "fore_r": Vector3(0.05, 0, 0), "sword": Vector3(-0.1, 0, 0),
-		"arm_l": Vector3(0.9, 0, -0.1), "fore_l": Vector3(0.2, 0, 0), "leg_l": Vector3(0.65, 0, 0), "shin_l": Vector3(-0.5, 0, 0),
-		"leg_r": Vector3(-0.5, 0, 0), "shin_r": Vector3(-0.15, 0, 0), "hip_y": -0.07},
-	],
-	&"heavy": [  # big two-handed overhead slam
-		{"torso": Vector3(-0.5, -0.2, 0), "head": Vector3(0.25, 0, 0), "arm_r": Vector3(3.25, 0, 0.15), "fore_r": Vector3(0.95, 0, 0), "sword": Vector3(0.3, 0, 0),
-		"arm_l": Vector3(3.0, 0, -0.15), "fore_l": Vector3(0.9, 0, 0), "leg_l": Vector3(0.25, 0, 0), "leg_r": Vector3(-0.2, 0, 0), "hip_y": -0.03},
-		{"torso": Vector3(0.7, 0.05, 0), "head": Vector3(-0.45, 0, 0), "arm_r": Vector3(0.55, 0, 0.0), "fore_r": Vector3(0.0, 0, 0), "sword": Vector3(-0.2, 0, 0),
-		"arm_l": Vector3(0.65, 0, 0.1), "fore_l": Vector3(0.1, 0, 0), "leg_l": Vector3(0.85, 0, 0), "shin_l": Vector3(-0.95, 0, 0),
-		"leg_r": Vector3(-0.65, 0, 0), "shin_r": Vector3(-0.2, 0, 0), "hip_y": -0.13},
-	],
-}
-
-
+## Attack poses come from the move resolved at attack start (ChoreoLibrary data).
 func _attack(p: Dictionary) -> void:
-	var keys: Array = ATTACK_KEYS.get(anim_action, ATTACK_KEYS[&"heavy"])
-	var wind: Dictionary = keys[0]
-	var strike: Dictionary = keys[1]
-	var rest := _rest
-	rest.merge(p, true)
-	var ph := anim_phase
-	for n: String in rest:
-		var a: Variant = rest[n]
-		var w: Variant = wind.get(n, a)
-		var s: Variant = strike.get(n, a)
-		var v: Variant
-		if ph < 1.0:
-			var t := 1.0 - pow(1.0 - ph, 2.0)
-			v = _lerp_v(a, w, t)
-		elif ph < 2.0:
-			var t2 := 1.0 - pow(1.0 - (ph - 1.0), 3.0)
-			v = _lerp_v(w, s, t2)
-		else:
-			var t3 := smoothstep(0.35, 1.0, ph - 2.0)
-			v = _lerp_v(s, a, t3)
-		p[n] = v
+	var move := anim_move
+	if move.is_empty():
+		move = ChoreoLibrary.find_move(&"unarmed" if unarmed else weapon_type, anim_action)
+	if not move.is_empty():
+		ChoreoPose.evaluate(move, p, anim_phase)
 
 
-static func _lerp_v(a: Variant, b: Variant, t: float) -> Variant:
-	if a is Vector3:
-		return (a as Vector3).lerp(b as Vector3, t)
-	return lerpf(float(a), float(b), t)
+static func _mix(p: Dictionary, target: Dictionary, w: float) -> void:
+	for j: String in target:
+		p[j] = ChoreoPose.lerp_joint(j, p.get(j, target[j]), target[j], w)
+
+
+## Hit reactions. stagger: recoil away from the hit with a catch step;
+## knockdown: driven to one knee, then rise; guard_break: guard flung open.
+## Durations come from the controller (unchanged hurt/i-frame rules).
+func _hurt(p: Dictionary) -> void:
+	var t := clampf(anim_t, 0.0, 1.0)
+	var d := hurt_dir
+	var front := maxf(d.y, 0.0)
+	var back := maxf(-d.y, 0.0)
+	var jolt := {
+		"torso": Vector3(-0.42 * d.y, -0.35 * d.x, 0.28 * d.x), "head": Vector3(-0.3 * d.y, -0.15 * d.x, 0.12 * d.x),
+		"arm_l": Vector3(0.75, 0, -0.6), "fore_l": Vector3(0.7, 0, 0), "arm_r": Vector3(0.7, 0, 0.6), "fore_r": Vector3(0.6, 0, 0),
+		"leg_l": Vector3(0.25 * front + 0.55 * back, 0, -0.05 - 0.25 * maxf(d.x, 0.0)), "shin_l": Vector3(-0.15 - 0.5 * back, 0, 0),
+		"leg_r": Vector3(-0.45 * front + 0.1 * back, 0, 0.05 + 0.25 * maxf(-d.x, 0.0)), "shin_r": Vector3(-0.35 * front - 0.1, 0, 0),
+	}
+	if p.has("hand_r"):
+		jolt["hand_r"] = (p["hand_r"] as Vector3) + Vector3(0.06, 0.02, 0.08)
+	match hurt_kind:
+		&"knockdown":
+			var hit_w := sin(PI * clampf(t / 0.3, 0.0, 1.0))
+			var down_w := smoothstep(0.12, 0.35, t) * (1.0 - smoothstep(0.7, 1.0, t))
+			_mix(p, jolt, hit_w)
+			var kneel := {
+				"torso": Vector3(0.38, 0.12 * d.x, 0.1 * d.x), "head": Vector3(-0.2, 0, 0),
+				"leg_l": Vector3(1.45, 0, -0.08), "shin_l": Vector3(-1.5, 0, 0),
+				"leg_r": Vector3(-0.1, 0, 0.08), "shin_r": Vector3(-1.85, 0, 0),
+				"arm_l": Vector3(0.75, 0, -0.3), "fore_l": Vector3(0.35, 0, 0),
+				"arm_r": Vector3(0.45, 0, 0.45), "fore_r": Vector3(0.7, 0, 0),
+			}
+			if p.has("hand_r"):
+				kneel["hand_r"] = Vector3(0.2, -0.05, -0.16)
+			_mix(p, kneel, down_w)
+		&"guard_break":
+			var w := smoothstep(0.0, 0.12, t) * (1.0 - smoothstep(0.55, 1.0, t))
+			var opened := {
+				"torso": Vector3(-0.45, 0, 0), "head": Vector3(-0.3, 0, 0),
+				"arm_l": Vector3(1.7, 0, -0.9), "fore_l": Vector3(0.3, 0, 0), "arm_r": Vector3(1.6, 0, 0.9), "fore_r": Vector3(0.3, 0, 0),
+				"leg_r": Vector3(-0.45, 0, 0.05), "shin_r": Vector3(-0.3, 0, 0), "leg_l": Vector3(0.2, 0, -0.05),
+			}
+			if p.has("hand_r"):
+				opened["hand_r"] = Vector3(0.3, 0.38, 0.05)
+			_mix(p, opened, w)
+		_:
+			var w2 := smoothstep(0.0, 0.14, t) * (1.0 - smoothstep(0.45, 1.0, t))
+			_mix(p, jolt, w2)
+
+
+## Grip-aware cast. Origins: flame_burst = mouth/chest (inhale, the free palm
+## comes to the mouth, then pushes the breath out), stone_guard = body (crouch,
+## palm to the ground), anything else = free palm forward. The weapon stays in
+## the right hand, lowered out of the way; the left hand is the casting hand.
+func _cast(p: Dictionary) -> void:
+	var t := clampf(anim_t, 0.0, 1.0)
+	var gather := smoothstep(0.0, 0.3, t)
+	var release := smoothstep(0.3, 0.55, t)
+	var weapon_low := {}
+	if p.has("hand_r"):
+		weapon_low["hand_r"] = (p["hand_r"] as Vector3) + Vector3(0.02, -0.02, 0.07)
+	elif not unarmed:
+		weapon_low = {"arm_r": Vector3(0.12, 0, 0.3), "fore_r": Vector3(0.85, 0, 0)}
+	match cast_skill:
+		&"stone_guard":
+			_mix(p, {"torso": Vector3(0.1, 0, 0), "head": Vector3(0.05, 0, 0),
+				"arm_l": Vector3(1.1, 0, 0.45), "fore_l": Vector3(1.8, 0, 0),
+				"leg_l": Vector3(0.4, 0, -0.18), "shin_l": Vector3(-0.65, 0, 0), "leg_r": Vector3(-0.25, 0, 0.18), "shin_r": Vector3(-0.6, 0, 0)}, gather)
+			_mix(p, {"torso": Vector3(0.38, 0, 0), "head": Vector3(-0.15, 0, 0),
+				"arm_l": Vector3(0.45, 0, -0.45), "fore_l": Vector3(0.25, 0, 0),
+				"leg_l": Vector3(0.45, 0, -0.2), "shin_l": Vector3(-0.8, 0, 0), "leg_r": Vector3(-0.3, 0, 0.2), "shin_r": Vector3(-0.7, 0, 0)}, release)
+			if unarmed:
+				_mix(p, {"arm_r": Vector3(1.0, 0, -0.4), "fore_r": Vector3(1.7, 0, 0)}, gather * (1.0 - release))
+				_mix(p, {"arm_r": Vector3(0.45, 0, 0.45), "fore_r": Vector3(0.25, 0, 0)}, release)
+			else:
+				_mix(p, weapon_low, gather)
+		_:
+			var to_mouth := cast_skill == &"flame_burst"
+			_mix(p, {"torso": Vector3(-0.12, -0.25, 0), "head": Vector3(-0.15, 0.2, 0),
+				"arm_l": Vector3(1.15 if to_mouth else 0.9, 0, 0.35 if to_mouth else 0.1), "fore_l": Vector3(1.95 if to_mouth else 1.2, 0, 0),
+				"leg_l": Vector3(0.3, 0, -0.05), "shin_l": Vector3(-0.2, 0, 0), "leg_r": Vector3(-0.25, 0, 0.05), "shin_r": Vector3(-0.3, 0, 0)}, gather)
+			_mix(p, {"torso": Vector3(0.28, 0.2, 0), "head": Vector3(0.15, -0.15, 0),
+				"arm_l": Vector3(1.5, -0.15, -0.05), "fore_l": Vector3(0.12, 0, 0),
+				"leg_l": Vector3(0.45, 0, -0.05), "shin_l": Vector3(-0.4, 0, 0), "leg_r": Vector3(-0.35, 0, 0.05), "shin_r": Vector3(-0.1, 0, 0)}, release)
+			_mix(p, weapon_low, gather)
 
 
 func _dodge(p: Dictionary) -> void:

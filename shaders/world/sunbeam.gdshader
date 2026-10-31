@@ -3,7 +3,7 @@ shader_type spatial;
 render_mode blend_add, unshaded, cull_disabled, depth_draw_never, shadows_disabled;
 
 uniform vec3 beam_color : source_color = vec3(1.0, 0.92, 0.70);
-uniform float strength = 0.16;
+uniform float strength = 0.08;
 
 void fragment() {
 	float across = sin(UV.x * PI);

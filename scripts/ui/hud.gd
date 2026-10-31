@@ -228,7 +228,6 @@ func _build_top() -> void:
 	boss_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top.add_child(boss_box)
 	boss_name = UiTheme.label("", &"BannerLabel", 24)
-	boss_name.add_theme_constant_override(&"outline_size", 6)
 	boss_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	boss_box.add_child(boss_name)
 	boss_bar = _bar(Vector2(640, 16), Color(0.85, 0.30, 0.16), false)
@@ -411,6 +410,12 @@ func _on_ability_failed(slot: int, reason: String) -> void:
 		toast(reason, &"warning")
 
 
+## Banners/toasts are hidden while a menu covers the screen (they keep queueing).
+func set_overlays_visible(on: bool) -> void:
+	banner_box.visible = on
+	toasts.visible = on
+
+
 # ================================================================ prompt
 func set_prompt(text: String) -> void:
 	if text.strip_edges() == "":
@@ -554,7 +559,8 @@ func _update_lock_visibility() -> void:
 
 
 func _poll_lock(force: bool = false) -> void:
-	if _lock_target == null:
+	if not lock_box.visible and not is_instance_valid(_lock_target):
+		_lock_target = null
 		return
 	if not is_instance_valid(_lock_target) or (_lock_target.has_method(&"is_dead") and _lock_target.is_dead()):
 		_lock_target = null
@@ -573,7 +579,7 @@ func _poll_lock(force: bool = false) -> void:
 
 # ================================================================ per frame
 func _process(_delta: float) -> void:
-	if lock_box.visible or _lock_target != null:
+	if lock_box.visible:
 		_poll_lock()
 	var ac := UiData.ability_controller()
 	var energy := 1e9

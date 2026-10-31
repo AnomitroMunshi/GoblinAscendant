@@ -85,3 +85,28 @@ static func swing_arc(from: Node3D, height: float, radius: float, color: Color, 
 	tw.tween_property(m, "albedo_color:a", 0.55, duration * 0.3)
 	tw.tween_property(m, "albedo_color:a", 0.0, duration * 0.7)
 	tw.tween_callback(mi.queue_free)
+
+
+## Restrained hit feedback: a few small dark-red droplets thrown along the knockback.
+static func hit_spray(from: Node, pos: Vector3, push: Vector3, size: float = 1.0) -> void:
+	var host := _host(from)
+	if host == null:
+		return
+	var dir := push.normalized() if push.length_squared() > 0.001 else Vector3.UP
+	for i in 3:
+		var mi := MeshInstance3D.new()
+		mi.mesh = EnemyModelKit.sphere(1.0, 6)
+		var m := StandardMaterial3D.new()
+		m.albedo_color = Color(0.42, 0.04, 0.04, 0.9)
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.roughness = 0.4
+		mi.material_override = m
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		host.add_child(mi)
+		mi.global_position = pos
+		mi.scale = Vector3.ONE * size * randf_range(0.03, 0.055)
+		var v := (dir + Vector3(randf_range(-0.6, 0.6), randf_range(0.2, 0.9), randf_range(-0.6, 0.6))).normalized()
+		var tw := mi.create_tween().set_parallel(true)
+		tw.tween_property(mi, "global_position", pos + v * randf_range(0.35, 0.7) + Vector3.DOWN * 0.25, 0.3).set_ease(Tween.EASE_OUT)
+		tw.tween_property(m, "albedo_color:a", 0.0, 0.3).set_ease(Tween.EASE_IN)
+		tw.chain().tween_callback(mi.queue_free)

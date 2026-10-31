@@ -20,7 +20,7 @@ func _ready() -> void:
 		m.rotation_degrees.y = 180.0 + yaws[i]
 	var cam := Camera3D.new()
 	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
-	cam.size = 2.9
+	cam.size = 3.5
 	cam.position = Vector3(0, 0.62, 6)
 	add_child(cam)
 	cam.make_current()
@@ -33,7 +33,8 @@ func _ready() -> void:
 	cam.look_at(Vector3(-0.8, 0.92, 0))
 	await _frames(5)
 	await _shot("goblin_face")
-	# 3/4 hero close-up
+	# 3/4 hero close-up: frame ears and feet with breathing room.
+	cam.fov = 36
 	cam.position = Vector3(-2.0, 0.75, 2.2)
 	cam.look_at(Vector3(-2.4, 0.55, 0))
 	await _frames(5)

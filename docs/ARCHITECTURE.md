@@ -31,15 +31,45 @@ peaceful races without provocation (neutral NPCs are never auto-targeted by anyt
 | World & Environment | World agent | `scripts/world/**`, `shaders/world/**` |
 | Player & Camera | Player agent | `scripts/player/**`, `shaders/player/**` |
 | Combat & Enemy AI | Combat agent | `scripts/enemies/**`, `shaders/enemies/**` |
+| Combat Choreography | Choreography agent | `docs/COMBAT_CHOREOGRAPHY.md`; animation/controller/FX/test files only through an explicit file assignment from the lead |
 | Progression & Quests | Progression agent | `scripts/progression/**`, `scripts/abilities/**`, `scripts/quests/**` |
 | UI & Audio | UI agent | `scripts/ui/**`, `scripts/audio/**`, `shaders/ui/**` |
-| Integration & QA | QA agent | `tests/**`, `docs/QA_REPORT.md` |
+| Combat Choreography | Choreography agent | `scripts/choreography/**`, `scripts/player/goblin_model.gd`, `scripts/player/player_fx.gd`, attack/guard/cast timing tables and attack-state code in `scripts/player/player.gd` (the Player agent has finished; choreography is the active owner of player.gd), `tests/choreo_*`, `tests/unarmed_visual.*` |
+| Character Art | Character Art agent | `scripts/characters/**` (shared model kit + Chapter 1 NPC/enemy model builders; wildlife and goblin NPC library deferred), the MODEL-BUILDING code in `scripts/enemies/enemy_model_kit.gd` / `enemy_wolf.gd` / `enemy_humanoid.gd` / `enemy_adventurer.gd` / `enemy_ogre.gd` (AI, attacks and stats in those files stay as they are), Nib's model in `scripts/quests/quest_friend.gd`, `tests/characters_*` |
+| Integration & QA | QA agent | `tests/**` (except other agents' own `tests/<area>_*` files), `docs/QA_REPORT.md` |
+
+Choreography handles **motion and timing**: poses, grips, footwork, anticipation, contact,
+follow-through, recovery and the alignment of active hit windows with visible contact. Combat/AI
+handles **decisions, damage and encounter rules**. Enemy model and animation files stay with
+the Combat agent. The choreographer sends exact enemy motion changes (pose keys, timings,
+telegraph cues) to the lead, and the Combat agent applies them. See `docs/COMBAT_CHOREOGRAPHY.md`.
+
+Full game while the default build is player-only: `godot --path . -- --full`.
 
 **Never edit another owner's file.** If you need a change in a shared/other file, put the request in
 your final report (exact proposed change). The lead integrates. Global `class_name`s must be
 prefixed by area to avoid collisions — pick names inside your area (e.g. `WorldTerrain`, `PlayerModel`,
 `EnemyBase`, `QuestData`, `HudBar`). Already taken: `Layers, WorldLayout, Palette, InputSetup,
 DamageInfo, Hitbox, HealthComponent, Interactable, TriggerZone, AbilityController`.
+
+### Combat Choreography agent
+
+Specialist for weapon-specific movesets, hand grips, footwork, punch/kick mechanics,
+guard, draw/holster transitions, casting poses and alignment of visible contact with hit windows.
+The shared instructions are in [COMBAT_CHOREOGRAPHY.md](COMBAT_CHOREOGRAPHY.md).
+This is a development role, not an additional runtime scene part or autoload.
+
+Agent entry points:
+- Claude Code: [combat-choreographer](../.claude/agents/combat-choreographer.md).
+- Codex custom agent: [combat_choreographer](../.codex/agents/combat-choreographer.toml).
+- Codex direct skill: [combat-choreography](../.agents/skills/combat-choreography/SKILL.md).
+
+The Player and Combat agents retain their existing ownership. The lead assigns exact files to
+Choreography for a task and avoids simultaneous edits by another owner; otherwise Choreography
+reviews and sends concrete integration requests. Combat/AI retains decisions, faction rules and
+damage resolution; Player retains locomotion and controller state. Choreography coordinates
+motion and timing with both. Verify animations graphically from useful angles as well as running
+relevant behavior tests. Creating this role does not resume paused work or start an agent.
 
 ## Autoloads (singletons)
 | Name | Owner | Purpose |
@@ -98,6 +128,12 @@ are separate from `human_raider`.
 Fair combat: at most 2 simultaneous melee attackers on the player (attack tokens), with the
 others repositioning. No detection or attacks through walls (LOS). Attacks only start in real
 range. Pursuit limits, reliable return home, anti-stuck recovery, and the boss resets to full HP.
+Implemented (Combat agent, 2026-10-31):
+- Extra AI state `RETREAT`: wounded goblin raiders back off.
+- Neutral adventurers are in `lock_targets` only while they hold a grudge.
+- Spawn-skip flags: `rescue_guards_defeated` / `friend_rescued`, `alpha_wolf_defeated`, `raider_captain_defeated`, `boss_defeated`. The boss arena zone id is `ogre_arena`.
+- Public API: `EnemyStats.create(type)`; `EnemyBase.configure()`, `alert()`, `assist()`, `state_name()`, `token_count()`; signals `state_changed` and `attack_performed`; `EnemyOgre.engage_boss()` / `disengage_boss()`.
+- Attack key poses live in data tables separate from the AI: `EnemyHumanoid.POSES` / `GUARD_POSE` / `HURT_POSE`, `EnemyOgre.OGRE_POSES` / `STOMP_LEG`, `EnemyWolf.POSES`. Timings live in each type's `_build_attacks()`. Choreography edits target these tables.
 Fighting styles: wolves circle then lunge; the alpha howls to alert nearby wolves; goblin raiders
 strike quickly and retreat when wounded; human raiders are deliberate and sometimes block; the
 captain has a telegraphed heavy attack; the ogre uses slow swings and a ground slam with
@@ -223,6 +259,12 @@ World applies quality/view-distance (shadows, SSAO, glow, fog, foliage density, 
 Audio applies volumes; camera applies its keys; `Settings` applies display keys.
 
 ## Art direction (all agents)
+**UPDATE 2026-10-31 (user): realism, nothing cartoonish. This is a mature game.** The world is
+a grounded, natural, realistic-leaning fantasy valley. It has believable trees and rocks, PBR
+materials (CC0 textures from ambientCG / Poly Haven allowed and recorded in
+`docs/ASSETS_WORLD.md`), a physically plausible sky, fog and lighting, and natural colour
+grading. Characters are grounded and mature (see the Character Art row). Where the older text
+below says "stylized", "soft gradients" or "anime-inspired", this update takes precedence.
 Fully 3D, third-person, stylized fantasy environments with **anime-inspired characters and combat**.
 Lush forests, colourful meadows, beautiful water, ancient ruins, warm sunlight, atmospheric distant
 mountains. Characters: expressive faces, readable silhouettes, stylized proportions; the goblin stays

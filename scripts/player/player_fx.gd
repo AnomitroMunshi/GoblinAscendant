@@ -101,7 +101,7 @@ static func swing_arc(from: Node, xform: Transform3D, kind: StringName, size: fl
 		return
 	var heavy := kind == &"heavy"
 	var color := HEAVY_ARC if heavy else LIGHT_ARC
-	var r_out := (1.15 if heavy else 0.95) * size
+	var r_out := (0.78 if heavy else 0.63) * size
 	var r_in := r_out * (0.6 if heavy else 0.62)
 	var mesh: ArrayMesh
 	var tilt := Vector3.ZERO  # rotation applied to the arc plane
@@ -132,6 +132,83 @@ static func swing_arc(from: Node, xform: Transform3D, kind: StringName, size: fl
 	tw.tween_property(mat, "albedo_color:a", 0.0, life).set_ease(Tween.EASE_IN)
 	tw.chain().tween_callback(mi.hide)
 	mi.set_meta(&"tween", tw)
+
+
+## Data-driven weapon trail (ChoreoLibrary move "trail"):
+##   style &"arc"    {from, to, tilt (deg), height, radius, inner (r_in/r_out), heavy}
+##                   the ribbon SWEEPS from `from` to `to` over the active window;
+##   style &"thrust" {height, from, to (m forward), width, rise, heavy}: a short
+##                   directional streak along the stab line, never a broad arc;
+##   style &"none"   punches, kicks, sling releases.
+static func trail(from: Node, xform: Transform3D, data: Dictionary, size: float = 1.0, active: float = 0.1) -> void:
+	match data.get("style", &"none"):
+		&"arc":
+			_sweep_arc(from, xform, data, size, active)
+		&"thrust":
+			_thrust_streak(from, xform, data, size, active)
+
+
+static func _sweep_arc(from: Node, xform: Transform3D, data: Dictionary, size: float, active: float) -> void:
+	var host := _host(from)
+	if host == null:
+		return
+	var heavy := bool(data.get("heavy", false))
+	var r_out := float(data.get("radius", 0.63)) * size
+	var r_in := r_out * float(data.get("inner", 0.62))
+	var a0 := float(data.get("from", 85.0))
+	var a1 := float(data.get("to", -80.0))
+	var mi := _get_arc(host)
+	mi.mesh = _arc_mesh(r_in, r_out, a0, lerpf(a0, a1, 0.25))
+	var mat := mi.material_override as StandardMaterial3D
+	mat.albedo_color = Color(HEAVY_ARC if heavy else LIGHT_ARC, 0.7 if heavy else 0.6)
+	var sweep := maxf(active, 0.06)
+	var life := sweep + (0.2 if heavy else 0.15)
+	mi.set_meta(&"free_at", Time.get_ticks_msec() + int(life * 1000.0) + 120)
+	var b := xform.basis.orthonormalized() * Basis.from_euler(Vector3(0, 0, deg_to_rad(float(data.get("tilt", 0.0)))))
+	mi.global_transform = Transform3D(b, xform.origin + Vector3.UP * float(data.get("height", 0.55)) * size)
+	var tw := mi.create_tween()
+	tw.tween_method(func(f: float) -> void:
+		if is_instance_valid(mi):
+			var q := snappedf(f, 0.125)
+			mi.mesh = _arc_mesh(r_in, r_out, a0, lerpf(a0, a1, q)), 0.25, 1.0, sweep)
+	tw.tween_property(mat, "albedo_color:a", 0.0, life - sweep).set_ease(Tween.EASE_IN)
+	tw.tween_callback(mi.hide)
+	mi.set_meta(&"tween", tw)
+
+
+static func _thrust_streak(from: Node, xform: Transform3D, data: Dictionary, size: float, active: float) -> void:
+	var host := _host(from)
+	if host == null:
+		return
+	var heavy := bool(data.get("heavy", false))
+	var z0 := float(data.get("from", 0.25)) * size
+	var z1 := float(data.get("to", 0.95)) * size
+	var w := float(data.get("width", 0.07)) * size
+	var rise := float(data.get("rise", 0.0)) * size
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	# Two crossed tapered ribbons so the streak reads from the side and from above.
+	for plane in 2:
+		var off := Vector3(w * 0.5, 0, 0) if plane == 0 else Vector3(0, w * 0.5, 0)
+		var tail := Vector3(0, 0, -z0)
+		var tip := Vector3(0, rise, -z1)
+		var verts := [tail - off * 0.2, tail + off * 0.2, tip - off, tip + off]
+		var cols := [Color(1, 1, 1, 0.0), Color(1, 1, 1, 0.0), Color(1, 1, 1, 1.0), Color(1, 1, 1, 1.0)]
+		for idx in [0, 2, 1, 1, 2, 3]:
+			st.set_color(cols[idx])
+			st.add_vertex(verts[idx])
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var mat := _fade_mat(Color(HEAVY_ARC if heavy else LIGHT_ARC, 0.75), true)
+	mi.material_override = mat
+	host.add_child(mi)
+	mi.global_transform = Transform3D(xform.basis.orthonormalized(), xform.origin + Vector3.UP * float(data.get("height", 0.6)) * size)
+	mi.scale = Vector3(1, 1, 0.35)
+	var tw := mi.create_tween()
+	tw.tween_property(mi, "scale", Vector3.ONE, maxf(active, 0.06)).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+	tw.tween_property(mat, "albedo_color:a", 0.0, 0.14 if not heavy else 0.2)
+	tw.tween_callback(mi.queue_free)
 
 
 ## Small impact burst: a bright flash, a star ring and a handful of shards.

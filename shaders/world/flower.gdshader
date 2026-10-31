@@ -23,8 +23,10 @@ void vertex() {
 
 void fragment() {
 	vec3 stem = COLOR.rgb;
-	stem = mix(stem / 12.92, pow((stem + 0.055) / 1.055, vec3(2.4)), step(0.04045, stem));
-	vec3 petal = mix(v_petal / 12.92, pow((v_petal + 0.055) / 1.055, vec3(2.4)), step(0.04045, v_petal));
+	stem = clamp(stem, vec3(0.0), vec3(4.0));
+	stem = stem * stem * (0.3 * stem + 0.7);  // sRGB -> linear (NaN-safe approx.)
+	vec3 petal = clamp(v_petal, vec3(0.0), vec3(4.0));
+	petal = petal * petal * (0.3 * petal + 0.7);
 	vec3 c = mix(stem, petal, v_mask);
 	ALBEDO = c;
 	ROUGHNESS = 0.8;

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Combat Choreography"
+  short_description: "Refine Goblin Ascendant combat motion and grips"
+  default_prompt: "Use $combat-choreography to inspect and improve the requested Goblin Ascendant combat animation, then verify it in Godot."

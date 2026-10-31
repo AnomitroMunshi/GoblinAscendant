@@ -27,6 +27,7 @@ const BAR_SHOW_TIME := 5.0
 const STUCK_WINDOW := 1.5
 const STUCK_GIVE_UP := 5.0
 const TOKEN_REUSE_DELAY := 0.8
+const HIT_FLASH_COLOR := Color(1.0, 0.32, 0.26)  # restrained red hit flash
 
 static var _tokens: Dictionary = {}  # target instance id -> Array[int] attacker ids
 
@@ -334,8 +335,10 @@ func take_damage(info: DamageInfo) -> int:
 	var killed := health.apply_damage(info.amount)
 	Events.actor_damaged.emit(self, info)
 	_on_damaged(info)
-	_flash(Color(1, 1, 1), 0.13)
-	Audio.play_sfx(&"hit", global_position + Vector3.UP * stats.body_height * 0.6)
+	_flash(HIT_FLASH_COLOR, 0.13)
+	var hp := info.hit_position if info.hit_position != Vector3.ZERO else global_position + Vector3.UP * stats.body_height * 0.6
+	EnemyFx.hit_spray(self, hp, info.knockback, clampf(stats.body_height, 0.8, 1.8))
+	Audio.play_sfx(&"hit", hp)
 	_knockback = _flat(info.knockback) * (1.0 - stats.knockback_resist)
 	if killed:
 		_die(info)

@@ -32,6 +32,27 @@ func _ready() -> void:
 	await _frames(22)
 	await _shot("playground_heavy")
 	await _frames(40)
+	await get_tree().create_timer(1.2).timeout
+	Input.action_press(&"holster")
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	Input.action_release(&"holster")
+	await get_tree().create_timer(0.15).timeout
+	await _shot("playground_holstered")
+	Input.action_press(&"attack_light")
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	Input.action_release(&"attack_light")
+	await get_tree().create_timer(0.13).timeout
+	await _shot("playground_punch")
+	await get_tree().create_timer(0.6).timeout
+	Input.action_press(&"attack_heavy")
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	Input.action_release(&"attack_heavy")
+	await get_tree().create_timer(0.3).timeout
+	await _shot("playground_kick")
+	await get_tree().create_timer(0.6).timeout
 	print("final pos: ", p.global_position, " on_floor: ", (p as CharacterBody3D).is_on_floor())
 	get_tree().quit()
 

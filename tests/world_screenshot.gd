@@ -22,7 +22,16 @@ const VIEWS := [
 	["ogre", Vector3(70, 6.0, -122), Vector3(98, 1.0, -155)],
 	["cave_mouth", Vector3(162, 2.2, -160), Vector3(180, 2.5, -181)],
 	["cave_inside", Vector3(181, 1.6, -181), Vector3(196, 1.2, -199)],
+	["cave_chamber", Vector3(203, 1.6, -205), Vector3(181, 1.5, -181)],
 	["aerial", Vector3(0, 230, 330), Vector3(0, 0, -40)],
+	["castle", Vector3(-60, 120, -330), Vector3(-90, 150, -620)],
+	["spring", Vector3(-44, 2.0, 62), Vector3(-56, 0.3, 53)],
+	["marsh", Vector3(-168, 2.2, -70), Vector3(-196, 0.5, -92)],
+	["marsh_in", Vector3(-185, 1.5, -100), Vector3(-205, 1.0, -78)],
+	["lake", Vector3(158, 3.0, 62), Vector3(192, 0.0, 78)],
+	["woods_pond", Vector3(-86, 2.0, 128), Vector3(-101, 0.3, 141)],
+	["glade_pond", Vector3(18, 2.0, 190), Vector3(31, 0.3, 181)],
+	["woods_air", Vector3(-60, 70, 140), Vector3(-130, 0, 85)],
 ]
 
 var world: Node3D
@@ -32,7 +41,10 @@ var cam: Camera3D
 func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	var only: PackedStringArray = []
+	var hide: PackedStringArray = []
 	for a in args:
+		if a.begins_with("hide="):
+			hide = a.substr(5).split(",")
 		if a.begins_with("quality="):
 			Settings.values[&"graphics_quality"] = int(a.substr(8))
 		elif a.begins_with("only="):
@@ -40,6 +52,16 @@ func _ready() -> void:
 	get_window().size = Vector2i(1600, 900)
 	world = load("res://scripts/world/world.gd").new()
 	add_child(world)
+	for pat in hide:
+		for n in world.find_children("*" + pat + "*", "", true, false):
+			if n is Node3D:
+				n.visible = false
+	if args.has("noglow"):
+		world.sky.env.glow_enabled = false
+	if args.has("nossao"):
+		world.sky.env.ssao_enabled = false
+	if args.has("novol"):
+		world.sky.env.volumetric_fog_enabled = false
 	cam = Camera3D.new()
 	cam.fov = 70.0
 	cam.far = 4000.0

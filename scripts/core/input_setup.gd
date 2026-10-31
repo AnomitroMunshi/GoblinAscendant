@@ -45,6 +45,7 @@ static func bindings() -> Dictionary:
 		&"attack_light": [_mouse(MOUSE_BUTTON_LEFT), _joy(JOY_BUTTON_X)],
 		&"attack_heavy": [_mouse(MOUSE_BUTTON_RIGHT), _joy(JOY_BUTTON_Y)],
 		&"dodge": [_key(KEY_CTRL), _joy(JOY_BUTTON_B)],
+		&"holster": [_key(KEY_H)],
 		&"block": [_key(KEY_Q), _axis(JOY_AXIS_TRIGGER_LEFT, 1.0)],
 		&"interact": [_key(KEY_E), _joy(JOY_BUTTON_DPAD_UP)],
 		&"lock_on": [_key(KEY_R), _joy(JOY_BUTTON_RIGHT_SHOULDER)],

@@ -8,7 +8,7 @@ extends RefCounted
 const TEXT := Color(0.95, 0.91, 0.83)
 const TEXT_DIM := Color(0.74, 0.69, 0.60)
 const TEXT_MUTED := Color(0.56, 0.52, 0.46)
-const GOLD := Palette.GOLD
+const GOLD := Color(0.88, 0.73, 0.43)   # muted gold (Palette.GOLD is brighter, used for accents)
 const GOLD_DIM := Color(0.72, 0.56, 0.27)
 const HP := Color(0.86, 0.22, 0.20)
 const STAMINA := Color(0.62, 0.84, 0.30)
@@ -37,7 +37,7 @@ static func serif() -> Font:
 	if _serif == null:
 		var f := SystemFont.new()
 		f.font_names = PackedStringArray(["Georgia", "Palatino Linotype", "Book Antiqua", "Cambria", "Noto Serif", "serif"])
-		f.font_weight = 600
+		f.font_weight = 500
 		f.antialiasing = TextServer.FONT_ANTIALIASING_GRAY
 		_serif = f
 	return _serif
@@ -176,8 +176,13 @@ static func _build() -> Theme:
 	_variation(t, &"SmallLabel", &"Label", 15, TEXT_DIM, 0)
 	_variation(t, &"HeaderLabel", &"Label", 28, GOLD, 0, serif())
 	_variation(t, &"SectionLabel", &"Label", 20, GOLD, 0, serif())
-	_variation(t, &"TitleLabel", &"Label", 86, GOLD, 10, serif())
-	_variation(t, &"BannerLabel", &"Label", 44, GOLD, 8, serif())
+	_variation(t, &"TitleLabel", &"Label", 84, GOLD, 3, serif())
+	_variation(t, &"BannerLabel", &"Label", 42, GOLD, 3, serif())
+	for v: StringName in [&"TitleLabel", &"BannerLabel"]:
+		t.set_constant(&"shadow_offset_x", v, 0)
+		t.set_constant(&"shadow_offset_y", v, 3)
+		t.set_constant(&"shadow_outline_size", v, 10)
+		t.set_color(&"font_shadow_color", v, Color(0, 0, 0, 0.45))
 
 	# Buttons
 	var b_normal := panel_box(Color(0.27, 0.20, 0.13, 0.96), Color(0.15, 0.11, 0.08, 0.96), Color(GOLD_DIM, 0.55), 8.0, 10.0)

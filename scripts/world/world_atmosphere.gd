@@ -18,10 +18,10 @@ func build(world: Node3D) -> void:
 	var g := WorldLayout.START_GLADE
 	var w := WorldLayout.WOLF_WOODS
 	# fireflies / magic motes
-	_fireflies(Vector3(g.x, 0, g.z - 6), Vector3(26, 2.5, 22), 70)
 	_fireflies(Vector3(w.x, 0, w.z), Vector3(45, 3, 45), 90)
 	_fireflies(Vector3(WorldLayout.RUINS.x, 0, WorldLayout.RUINS.z), Vector3(30, 2.5, 30), 50)
 	_fireflies(Vector3(WorldTerrain.POND.x, 0, WorldTerrain.POND.z), Vector3(8, 1.5, 8), 24)
+	_fireflies(Vector3(WorldLayout.MARSH.x, 0, WorldLayout.MARSH.z), Vector3(26, 2.0, 26), 60)
 	# falling leaves in the woods and around the giant trees
 	_leaves(Vector3(w.x, 0, w.z), Vector3(55, 6, 55), 110)
 	_leaves(Vector3(-42, 0, 200), Vector3(14, 4, 14), 26)
@@ -64,7 +64,7 @@ static func soft_particle_mat(col: Color, additive: bool, energy: float = 0.0) -
 	return m
 
 
-func _base(pos: Vector3, amount: int, life: float, box: Vector3) -> Array:
+func _base(pos: Vector3, amount: int, life: float, box: Vector3, parent: Node = null) -> Array:
 	var p := GPUParticles3D.new()
 	p.amount = amount
 	p.lifetime = life
@@ -77,7 +77,10 @@ func _base(pos: Vector3, amount: int, life: float, box: Vector3) -> Array:
 	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
 	pm.emission_box_extents = box
 	p.process_material = pm
-	add_child(p)
+	if parent:
+		parent.add_child(p)
+	else:
+		add_child(p)
 	particles.append(p)
 	return [p, pm]
 
@@ -110,8 +113,8 @@ func _fireflies(centre: Vector3, box: Vector3, amount: int) -> void:
 	gt.gradient = g
 	pm.color_ramp = gt
 	var q := QuadMesh.new()
-	q.size = Vector2(0.22, 0.22)
-	q.material = soft_particle_mat(Color(1.0, 0.92, 0.5), true, 6.0)
+	q.size = Vector2(0.08, 0.08)
+	q.material = soft_particle_mat(Color(1.0, 0.9, 0.5), true, 1.6)
 	p.draw_pass_1 = q
 	p.visibility_range_end = 90.0
 
@@ -137,12 +140,17 @@ func _leaves(centre: Vector3, box: Vector3, amount: int) -> void:
 	pm.hue_variation_max = 0.06
 	var m := StandardMaterial3D.new()
 	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
-	m.albedo_color = Color(0.62, 0.66, 0.24)
+	m.albedo_color = Color(0.85, 0.8, 0.55)
+	m.albedo_texture = WorldTextures.foliage_atlas()
+	m.uv1_scale = Vector3(0.12, 0.12, 1.0)
+	m.uv1_offset = Vector3(0.69, 0.2, 0.0)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+	m.alpha_scissor_threshold = 0.5
 	m.vertex_color_use_as_albedo = true
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	m.diffuse_mode = BaseMaterial3D.DIFFUSE_LAMBERT_WRAP
 	var q := QuadMesh.new()
-	q.size = Vector2(0.18, 0.12)
+	q.size = Vector2(0.16, 0.16)
 	q.material = m
 	p.draw_pass_1 = q
 	p.visibility_range_end = 110.0
@@ -176,7 +184,7 @@ func _motes(centre: Vector3, box: Vector3, amount: int) -> void:
 
 
 func _pollen() -> GPUParticles3D:
-	var r := _base(WorldLayout.PLAYER_START, 140, 8.0, Vector3(18, 5, 18))
+	var r := _base(WorldLayout.PLAYER_START, 90, 8.0, Vector3(14, 3, 14))
 	var p: GPUParticles3D = r[0]
 	var pm: ParticleProcessMaterial = r[1]
 	p.name = "Pollen"
@@ -199,8 +207,8 @@ func _pollen() -> GPUParticles3D:
 	gt.gradient = g
 	pm.color_ramp = gt
 	var q := QuadMesh.new()
-	q.size = Vector2(0.06, 0.06)
-	q.material = soft_particle_mat(Color(1.0, 0.97, 0.85), false, 1.5)
+	q.size = Vector2(0.035, 0.035)
+	q.material = soft_particle_mat(Color(0.9, 0.88, 0.8), false)
 	p.draw_pass_1 = q
 	return p
 
@@ -254,14 +262,11 @@ func _sunbeams(world: Node3D) -> void:
 
 ## Fire: particles + optional flickering light (no shadows).
 func add_fire(parent: Node3D, pos: Vector3, scale_f: float = 1.0, with_light: bool = true) -> void:
-	var r := _base(pos, int(28 * scale_f) + 6, 0.9, Vector3(0.25, 0.05, 0.25) * scale_f)
+	var r := _base(pos, int(28 * scale_f) + 6, 0.9, Vector3(0.25, 0.05, 0.25) * scale_f, parent)
 	var p: GPUParticles3D = r[0]
 	var pm: ParticleProcessMaterial = r[1]
 	p.name = "Fire"
 	p.preprocess = 0.5
-	if p.get_parent() != parent:
-		p.reparent(parent, false)
-	p.position = pos
 	pm.direction = Vector3.UP
 	pm.spread = 12.0
 	pm.initial_velocity_min = 0.8 * scale_f
@@ -288,12 +293,10 @@ func add_fire(parent: Node3D, pos: Vector3, scale_f: float = 1.0, with_light: bo
 	p.draw_pass_1 = q
 	p.visibility_range_end = 120.0
 	# smoke
-	var r2 := _base(pos + Vector3(0, 1.0 * scale_f, 0), int(10 * scale_f) + 3, 3.5, Vector3(0.2, 0.1, 0.2))
+	var r2 := _base(pos + Vector3(0, 1.0 * scale_f, 0), int(10 * scale_f) + 3, 3.5, Vector3(0.2, 0.1, 0.2), parent)
 	var sm: GPUParticles3D = r2[0]
 	var spm: ParticleProcessMaterial = r2[1]
 	sm.name = "Smoke"
-	sm.reparent(parent, false)
-	sm.position = pos + Vector3(0, 1.0 * scale_f, 0)
 	spm.direction = Vector3.UP
 	spm.spread = 15.0
 	spm.initial_velocity_min = 0.6

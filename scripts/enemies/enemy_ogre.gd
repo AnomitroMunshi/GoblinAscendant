@@ -12,49 +12,23 @@ var enraged := false
 var _roar_time := 0.0
 var _charge: EnemyAttack
 
+## Choreography data: same format as EnemyHumanoid.POSES (generous, heavy anticipation).
+const OGRE_POSES := {
+	&"smash":  {"windup": Vector4(3.0, 3.0, 0.35, 0.0), "strike": Vector4(0.75, 0.75, -0.6, 0.0), "reach": 0.45, "follow": 0.55, "windup_rate": 6.0, "strike_rate": 24.0, "recover_rate": 3.0},
+	&"sweep":  {"windup": Vector4(1.4, 0.4, 0.1, 1.25), "strike": Vector4(1.4, -0.2, -0.15, -1.3), "reach": 0.5, "follow": 0.5, "windup_rate": 6.0, "strike_rate": 18.0, "recover_rate": 3.0},
+	&"stomp":  {"windup": Vector4(0.6, 0.6, 0.25, 0.0), "strike": Vector4(0.3, 0.3, -0.15, 0.0), "reach": 0.5, "follow": 0.4, "windup_rate": 7.0, "strike_rate": 30.0, "recover_rate": 4.0},
+	&"charge": {"windup": Vector4(-0.6, -0.6, -0.45, 0.0), "strike": Vector4(1.2, 1.0, -0.6, 0.0), "reach": 0.5, "follow": 0.3, "windup_rate": 6.0, "strike_rate": 12.0, "recover_rate": 3.0},
+}
+## Stomp leg lift (right hip pitch) during wind-up / at impact.
+const STOMP_LEG := {"windup": 1.1, "strike": -0.1}
+
 
 func _default_type() -> StringName:
 	return &"ogre"
 
 
 func _make_style() -> Dictionary:
-	var s := super()
-	s.merge({"leg_len": 1.0, "leg_r": 0.3, "hip_w": 0.42, "torso_len": 1.25, "torso_w": 1.5, "torso_d": 1.15,
-		"head_r": 0.38, "arm_len": 1.5, "arm_r": 0.25, "shoulder_w": 0.92,
-		"skin": Palette.OGRE_SKIN, "top": Palette.OGRE_SKIN, "pants": Palette.OGRE_SKIN.darkened(0.12),
-		"boots": Palette.OGRE_SKIN.darkened(0.3), "iris": Color(1.0, 0.45, 0.1), "mood": 1.0,
-		"brow": Palette.OGRE_SKIN.darkened(0.45), "weapon": &"ogre_club", "offhand": &""}, true)
-	return s
-
-
-func _build_weapon(w: Node3D, kind: StringName) -> void:
-	if kind != &"ogre_club":
-		super(w, kind)
-		return
-	EnemyModelKit.part(w, EnemyModelKit.cyl(0.3, 0.11, 1.9, 10), Palette.BARK, Vector3(0, -0.85, 0), Vector3(180, 0, 0))
-	EnemyModelKit.part(w, EnemyModelKit.cyl(0.32, 0.32, 0.12, 10), Palette.RUST.darkened(0.2), Vector3(0, -1.5, 0))
-	for i in 5:
-		var a := TAU * i / 5.0
-		EnemyModelKit.part(w, EnemyModelKit.prism(Vector3(0.12, 0.22, 0.12)), Palette.STEEL.darkened(0.2),
-			Vector3(cos(a) * 0.3, -1.65 - (i % 2) * 0.15, sin(a) * 0.3), Vector3(0, -rad_to_deg(a), 90))
-
-
-func _decorate(s: Dictionary) -> void:
-	var hr: float = s["head_r"]
-	var tl: float = s["torso_len"]
-	var skin: Color = s["skin"]
-	# hunch the head forward, big belly, loincloth, fur shoulder, tusks
-	_head.position += Vector3(0, -0.12, -0.32)
-	EnemyModelKit.part(_torso, EnemyModelKit.sphere(0.85, 16), skin.lightened(0.08), Vector3(0, 0.45, -0.22), Vector3.ZERO, Vector3(1.0, 0.9, 0.9))
-	EnemyModelKit.part(_torso, EnemyModelKit.box(Vector3(0.9, 0.7, 0.08)), Palette.LEATHER, Vector3(0, -0.15, -0.72), Vector3(-8, 0, 0))
-	EnemyModelKit.part(_torso, EnemyModelKit.cyl(0.78, 0.8, 0.16, 14), Palette.LEATHER.darkened(0.3), Vector3(0, 0.05, -0.1))
-	EnemyModelKit.part(_torso, EnemyModelKit.box(Vector3(0.18, tl * 1.25, 0.06)), Palette.LEATHER.darkened(0.2), Vector3(0.1, tl * 0.55, -0.62), Vector3(0, 0, -38))
-	EnemyModelKit.part(_torso, EnemyModelKit.sphere(0.42, 12), Color(0.35, 0.28, 0.22), Vector3(-0.85, tl * 0.98, 0.05), Vector3.ZERO, Vector3(1.2, 0.75, 1.2))
-	EnemyModelKit.part(_head, EnemyModelKit.box(Vector3(hr * 1.7, hr * 0.28, hr * 0.5)), skin.darkened(0.3), Vector3(0, hr * 0.32, -hr * 0.78))
-	EnemyModelKit.part(_head, EnemyModelKit.box(Vector3(hr * 1.6, hr * 0.7, hr * 1.1)), skin.darkened(0.08), Vector3(0, -hr * 0.6, -hr * 0.25))
-	for side: float in [-1.0, 1.0]:
-		EnemyModelKit.part(_head, EnemyModelKit.prism(Vector3(0.08, 0.2, 0.08)), Color(0.95, 0.9, 0.75), Vector3(side * hr * 0.5, -hr * 0.4, -hr * 0.85))
-		EnemyModelKit.part(_head, EnemyModelKit.prism(Vector3(0.1, 0.16, 0.05)), skin.darkened(0.15), Vector3(side * hr * 1.0, hr * 0.1, 0), Vector3(0, 0, -side * 70.0))
+	return CharDefs.ogre()
 
 
 func _build_attacks() -> void:
@@ -219,29 +193,15 @@ func _on_death(_info: DamageInfo) -> void:
 	GameFeel.shake(0.8)
 
 
-func _windup_pose(anim: StringName) -> Vector4:
-	match anim:
-		&"smash": return Vector4(3.0, 3.0, 0.35, 0.0)
-		&"sweep": return Vector4(1.4, 0.4, 0.1, 1.25)
-		&"stomp": return Vector4(0.6, 0.6, 0.25, 0.0)
-		&"charge": return Vector4(-0.6, -0.6, -0.45, 0.0)
-	return super(anim)
-
-
-func _strike_pose(anim: StringName) -> Vector4:
-	match anim:
-		&"smash": return Vector4(0.75, 0.75, -0.6, 0.0)
-		&"sweep": return Vector4(1.4, -0.2, -0.15, -1.3)
-		&"stomp": return Vector4(0.3, 0.3, -0.15, 0.0)
-		&"charge": return Vector4(1.2, 1.0, -0.6, 0.0)
-	return super(anim)
+func _pose_data(anim: StringName) -> Dictionary:
+	return OGRE_POSES[anim] if OGRE_POSES.has(anim) else super(anim)
 
 
 func _animate(delta: float) -> void:
 	super(delta)
 	var r := 1.0 - exp(-12.0 * delta)
 	if state == State.ATTACK and current_attack and current_attack.anim == &"stomp":
-		_leg_r.rotation.x = lerpf(_leg_r.rotation.x, 1.1 if attack_phase == Phase.WINDUP else -0.1, r if attack_phase == Phase.WINDUP else 1.0)
+		_leg_r.rotation.x = lerpf(_leg_r.rotation.x, float(STOMP_LEG["windup"]) if attack_phase == Phase.WINDUP else float(STOMP_LEG["strike"]), r if attack_phase == Phase.WINDUP else 1.0)
 	if _roar_time > 0.0:
 		_arm_l.rotation.z = lerpf(_arm_l.rotation.z, -1.2, r)
 		_arm_r.rotation.z = lerpf(_arm_r.rotation.z, 1.2, r)

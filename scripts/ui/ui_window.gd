@@ -49,6 +49,8 @@ func _init(title: String = "", p_desired: Vector2 = Vector2(720, 640), closable:
 func _ready() -> void:
 	resized.connect(_fit)
 	_fit()
+	footer.visible = footer.get_child_count() > 0
+	footer.child_entered_tree.connect(func(_c: Node) -> void: footer.visible = true)
 
 
 ## Panel size = desired, clamped to the available area.
@@ -68,8 +70,12 @@ func add_scroll() -> VBoxContainer:
 	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	content.add_child(sc)
+	var pad := MarginContainer.new()
+	pad.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pad.add_theme_constant_override(&"margin_right", 18)
+	sc.add_child(pad)
 	var v := VBoxContainer.new()
 	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	v.add_theme_constant_override(&"separation", 8)
-	sc.add_child(v)
+	pad.add_child(v)
 	return v

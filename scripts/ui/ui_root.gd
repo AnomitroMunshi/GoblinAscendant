@@ -120,8 +120,8 @@ func _build_death() -> void:
 	v.grow_vertical = Control.GROW_DIRECTION_BOTH
 	v.alignment = BoxContainer.ALIGNMENT_CENTER
 	death_screen.add_child(v)
-	var t := UiTheme.label("You have fallen…", &"TitleLabel", 64)
-	t.add_theme_color_override(&"font_color", Color(0.86, 0.32, 0.26))
+	var t := UiTheme.label("You have fallen…", &"TitleLabel", 62)
+	t.add_theme_color_override(&"font_color", Color(0.74, 0.24, 0.19))
 	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(t)
 	var s := UiTheme.label("Rising again at the last checkpoint", &"HudLabel", 20)
@@ -203,6 +203,7 @@ func _set_mode(m: Mode) -> void:
 	mode = m
 	var menu := m != Mode.PLAY
 	hud.visible = m != Mode.TITLE
+	hud.set_overlays_visible(m == Mode.PLAY)
 	title_screen.visible = m == Mode.TITLE
 	pause_menu.visible = m == Mode.PAUSE and _sub == null
 	character_panel.visible = m == Mode.CHARACTER

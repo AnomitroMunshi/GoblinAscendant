@@ -40,6 +40,7 @@ var sky: WorldSky
 var zones: WorldZones
 var atmosphere: WorldAtmosphere
 var modules: Dictionary = {}
+var extra_trees: Array = []   # [Vector3 pos, kind(int), scale] requested by landmarks
 var build_msec := 0.0
 var stats: Dictionary = {}
 

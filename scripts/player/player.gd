@@ -45,7 +45,7 @@ const STAMINA_REGEN_DELAY := 0.75
 const EXHAUST_THRESHOLD := 20.0     # sprint locked after running dry until this much regenerates
 const ENERGY_REGEN := 4.0
 const DODGE_COST := 22.0
-const LIGHT_COST := 5.0
+const LIGHT_COST := 5.0             # fallback; per-move cost lives in ChoreoLibrary data
 const HEAVY_COST := 14.0
 
 # ---- dodge ----------------------------------------------------------------------------
@@ -67,16 +67,10 @@ const AUTO_AIM_COS := 0.866         # 60 deg cone (+-30)
 const SHOCKWAVE_RADIUS := 3.6
 const DEATH_RESPAWN_TIME := 3.0
 
-## Attack data: windup / active / recovery seconds, damage multiplier, lunge
-## speed, stagger, knockback, chain window start (fraction of recovery
-## after which a buffered next input starts the next step).
-const ATTACKS := {
-	&"light1": {"windup": 0.13, "active": 0.1, "recovery": 0.27, "mult": 1.0, "lunge": 3.2, "stagger": 0.3, "knock": 2.5},
-	&"light2": {"windup": 0.11, "active": 0.1, "recovery": 0.27, "mult": 1.1, "lunge": 3.2, "stagger": 0.3, "knock": 2.5},
-	&"light3": {"windup": 0.2, "active": 0.12, "recovery": 0.42, "mult": 1.5, "lunge": 4.2, "stagger": 0.6, "knock": 5.0},
-	&"heavy": {"windup": 0.42, "active": 0.14, "recovery": 0.52, "mult": 2.2, "lunge": 3.6, "stagger": 0.95, "knock": 8.0},
-}
-const LIGHT_CHAIN := [&"light1", &"light2", &"light3"]
+## Attack timing, reach, hitboxes, footwork, trails and poses are data:
+## scripts/choreography/movesets/*.gd via ChoreoLibrary. A move is resolved
+## once at attack start (_attack_move) so equip changes never alter it midway.
+const KNOCKDOWN_STAGGER := 0.9      # heavy hits at/above this drop the goblin to a knee
 const PHASE_KEYS := ["windup", "active", "recovery"]
 
 # ---- public state ---------------------------------------------------------------------
@@ -139,6 +133,16 @@ var _last_emitted := PackedFloat32Array([-1, -1, -1, -1, -1, -1])
 var _interact_timer := 0.0
 var _emit_cooldown := 0.0
 var _hit_this_swing: Dictionary = {}
+var _weapon_holstered := false
+var _attack_unarmed := false
+var _weapon_type: StringName = &"knife"   # readied weapon moveset (inventory system: later)
+var _attack_move: Dictionary = {}
+var _lunge_v0 := 0.0
+var _lunge_time := 0.2
+var _lunge_t := 0.0
+var _lunge_target: Node3D            # auto-aim/lock target: the lunge stops on contact
+const LUNGE_STOP_GAP := 0.72         # body-centre distance where footwork stops (Goblin scale)
+var _cast_skill: StringName = &""
 
 
 func _init() -> void:
@@ -180,7 +184,7 @@ func _ready() -> void:
 	_hitbox = Hitbox.new()
 	_hitbox.name = "MeleeHitbox"
 	_facing_pivot.add_child(_hitbox)
-	_hitbox.setup(self, _light_shape(), Vector3(0, 0.6, -0.85))
+	_hitbox.setup(self, _box_shape(Vector3(0.9, 1.0, 0.7)), Vector3(0, 0.6, -0.50))
 	_hitbox.hit_landed.connect(_on_hit_landed)
 	_shock_hitbox = Hitbox.new()
 	_shock_hitbox.name = "ShockwaveHitbox"
@@ -228,6 +232,8 @@ func _ready() -> void:
 	Events.stats_upgraded.connect(_on_stats_upgraded)
 	Events.level_up.connect(_on_level_up)
 	Events.evolution_changed.connect(_on_evolution_changed)
+	Events.ability_used.connect(_on_ability_used)
+	model.set_weapon(_weapon_type)
 	_emit_spawned.call_deferred()
 
 
@@ -241,15 +247,9 @@ func _emit_spawned() -> void:
 	_emit_stats(true)
 
 
-func _light_shape() -> BoxShape3D:
+func _box_shape(size: Vector3) -> BoxShape3D:
 	var b := BoxShape3D.new()
-	b.size = Vector3(1.5, 1.3, 1.5)
-	return b
-
-
-func _heavy_shape() -> BoxShape3D:
-	var b := BoxShape3D.new()
-	b.size = Vector3(2.0, 1.5, 1.9)
+	b.size = size
 	return b
 
 
@@ -267,6 +267,88 @@ func _apply_stage_scale(stage: StringName) -> void:
 
 
 # ================================================================ Player API
+func is_weapon_holstered() -> bool:
+	return _weapon_holstered
+
+
+func toggle_holster() -> bool:
+	if GameState.is_input_blocked() or is_dead() or state not in [State.IDLE, State.MOVE, State.BLOCK]:
+		return false
+	_weapon_holstered = not _weapon_holstered
+	_chain_index = 0
+	_chain_reset = 0.0
+	_attack_buffer = 0.0
+	model.set_weapon_drawn(not _weapon_holstered)
+	if state == State.BLOCK:
+		_set_state(State.IDLE)
+	var label := String(ChoreoLibrary.moveset(_weapon_type).get("label", "Weapon"))
+	Events.notify.emit(("%s stowed - unarmed" % label) if _weapon_holstered else ("%s drawn" % label), &"info")
+	return true
+
+
+func get_weapon_type() -> StringName:
+	return _weapon_type
+
+
+## Moveset currently in use (&"unarmed" while the weapon is stowed).
+func get_active_moveset_id() -> StringName:
+	return &"unarmed" if _weapon_holstered else _weapon_type
+
+
+## Readies a weapon type (future inventory/equipment hook). Refused while busy,
+## dead, in a menu, or if the evolution stage may not use it (backlog loadouts).
+## An accepted switch resets the combo and draws the new weapon.
+func equip_weapon(type: StringName) -> bool:
+	return _equip(type, false)
+
+
+## Debug-build only: switch weapon movesets (numpad 1..4 in the playground).
+func debug_set_weapon(type: StringName) -> bool:
+	if not OS.is_debug_build():
+		return false
+	return _equip(type, true)
+
+
+func _equip(type: StringName, debug: bool) -> bool:
+	if not ChoreoLibrary.has(type) or (type == &"unarmed" and not debug):
+		return false
+	if is_dead() or state not in [State.IDLE, State.MOVE, State.BLOCK, State.AIR]:
+		return false
+	if not debug and (GameState.is_input_blocked() or not ChoreoLibrary.can_equip(type, Progression.stage)):
+		return false
+	if type == &"unarmed":
+		if not _weapon_holstered:
+			toggle_holster()
+		return true
+	_weapon_type = type
+	_weapon_holstered = false
+	_chain_index = 0
+	_chain_reset = 0.0
+	_attack_buffer = 0.0
+	model.set_weapon(type)
+	model.set_weapon_drawn(true)
+	if state == State.BLOCK:
+		_set_state(State.IDLE)
+	Events.notify.emit("%s readied" % String(ChoreoLibrary.moveset(type).get("label", type)), &"info")
+	return true
+
+
+func _debug_weapon_keys_enabled() -> bool:
+	if not OS.is_debug_build() or get_parent() == null:
+		return false
+	var world := get_parent().get_node_or_null("World")
+	return world != null and world.get_script() != null and String((world.get_script() as Script).resource_path).contains("movement_playground")
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	var k := event as InputEventKey
+	if k == null or not k.pressed or k.echo or not _debug_weapon_keys_enabled():
+		return
+	var idx := [KEY_KP_1, KEY_KP_2, KEY_KP_3, KEY_KP_4].find(k.keycode)
+	if idx >= 0 and idx < ChoreoLibrary.DEBUG_ORDER.size():
+		debug_set_weapon(ChoreoLibrary.DEBUG_ORDER[idx])
+
+
 func get_faction() -> StringName:
 	return Factions.PLAYER
 
@@ -289,6 +371,18 @@ func get_facing_yaw() -> float:
 
 func get_cast_origin() -> Vector3:
 	return global_position + Vector3.UP * 0.7 * _scale + get_facing() * 0.6 * _scale
+
+
+## Skill-specific effect origin (proposed for AbilityController): flame_burst
+## leaves the mouth/chest, stone_guard is centred on the body, others use the
+## free palm in front of the chest.
+func get_cast_origin_for(skill: StringName) -> Vector3:
+	match skill:
+		&"flame_burst":
+			return global_position + Vector3.UP * 0.66 * _scale + get_facing() * 0.42 * _scale
+		&"stone_guard":
+			return global_position + Vector3.UP * 0.45 * _scale
+	return get_cast_origin()
 
 
 func is_busy() -> bool:
@@ -350,7 +444,25 @@ func play_cast_animation() -> void:
 		return
 	_end_attack()
 	_cast_time = 0.4
+	_cast_skill = &""
+	model.cast_skill = &""
 	_set_state(State.CAST)
+
+
+## Same as play_cast_animation() but selects the skill's pose directly.
+func play_cast_animation_for(skill: StringName) -> void:
+	play_cast_animation()
+	if state == State.CAST:
+		_cast_skill = skill
+		model.cast_skill = skill
+
+
+## AbilityController emits ability_used right after play_cast_animation(): use
+## it to pick the skill-specific cast pose without changing that API.
+func _on_ability_used(_slot: int, ability_id: StringName) -> void:
+	if state == State.CAST and _state_time <= 0.05:
+		_cast_skill = ability_id
+		model.cast_skill = ability_id
 
 
 func respawn() -> void:
@@ -385,13 +497,13 @@ func take_damage(info: DamageInfo) -> int:
 	var guard_break := false
 	if state == State.BLOCK and not info.unblockable and _is_frontal(info):
 		var cost := BLOCK_STAMINA_BASE + info.amount * BLOCK_STAMINA_PER_DMG
-		amount *= 1.0 - BLOCK_REDUCTION
+		amount *= 1.0 - _guard_reduction()
 		if stamina >= cost:
 			_use_stamina(cost)
 			result = DamageInfo.Result.BLOCKED
 			Audio.play_sfx(&"block", global_position + Vector3.UP * 0.6)
 			PlayerFx.impact(self, info.hit_position if info.hit_position != Vector3.ZERO else get_cast_origin(), false, Color(0.75, 0.9, 1.0))
-			model.flinch(0.4)
+			model.guard_impact(0.6 + (0.4 if info.is_heavy else 0.0))
 			velocity += info.knockback * 0.35
 		else:
 			_use_stamina(stamina)
@@ -409,9 +521,16 @@ func take_damage(info: DamageInfo) -> int:
 		elif guard_break or info.stagger >= 0.5:
 			_end_attack()
 			_hurt_time = 0.8 if guard_break else lerpf(0.3, 0.55, clampf(info.stagger, 0.5, 1.0) * 2.0 - 1.0)
+			model.hurt_dir = _hit_dir_local(info)
+			if guard_break:
+				model.hurt_kind = &"guard_break"
+			elif info.is_heavy and info.stagger >= KNOCKDOWN_STAGGER:
+				model.hurt_kind = &"knockdown"
+			else:
+				model.hurt_kind = &"stagger"
 			_set_state(State.HURT)
 		else:
-			model.flinch(0.8)
+			model.flinch(0.8, _hit_dir_local(info))
 	elif killed:
 		result = DamageInfo.Result.KILLED
 	Events.player_damaged.emit(dealt)
@@ -420,6 +539,27 @@ func take_damage(info: DamageInfo) -> int:
 	if killed:
 		_die()
 	return result
+
+
+## Guard damage reduction from the active moveset (knife 0.8, unarmed 0.35, ...).
+func _guard_reduction() -> float:
+	return float(ChoreoLibrary.moveset(get_active_moveset_id()).get("guard", {}).get("reduction", BLOCK_REDUCTION))
+
+
+## Direction the hit came FROM in body space: x > 0 right side, y > 0 front.
+func _hit_dir_local(info: DamageInfo) -> Vector2:
+	var dir := Vector3.ZERO
+	if is_instance_valid(info.source):
+		dir = info.source.global_position - global_position
+	elif info.knockback.length_squared() > 0.0001:
+		dir = -info.knockback
+	dir.y = 0.0
+	if dir.length_squared() < 0.0001:
+		return Vector2(0, 1)
+	dir = dir.normalized()
+	var fwd := get_facing()
+	var right := Vector3(-fwd.z, 0.0, fwd.x)
+	return Vector2(dir.dot(right), dir.dot(fwd))
 
 
 func _is_frontal(info: DamageInfo) -> bool:
@@ -561,6 +701,8 @@ func _read_input(blocked: bool, delta: float) -> void:
 		_jump_held = false
 		return
 	_move_input = Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_back")
+	if Input.is_action_just_pressed(&"holster"):
+		toggle_holster()
 	_jump_held = Input.is_action_pressed(&"jump")
 	if Input.is_action_just_pressed(&"jump"):
 		_jump_buffer = JUMP_BUFFER
@@ -863,33 +1005,43 @@ func _update_dodge(delta: float) -> void:
 func _start_attack(heavy: bool) -> bool:
 	if not is_on_floor():
 		return false
-	var cost := HEAVY_COST if heavy else LIGHT_COST
 	if stamina <= 0.0:
 		return false
-	var next: StringName
+	var ms := ChoreoLibrary.moveset(get_active_moveset_id())
+	var chain: Array = ms["light"]
+	var move: Dictionary
 	if heavy:
-		next = &"heavy"
+		move = ms["heavy"]
 	else:
-		if _chain_reset <= 0.0:
+		if _chain_reset <= 0.0 or _chain_index >= chain.size():
 			_chain_index = 0
-		next = LIGHT_CHAIN[_chain_index % LIGHT_CHAIN.size()]
-		_chain_index = (_chain_index + 1) % LIGHT_CHAIN.size()
+		move = chain[_chain_index]
+		_chain_index = (_chain_index + 1) % chain.size()
 	_attack_buffer = 0.0
-	_use_stamina(cost)
-	_attack_name = next
+	_use_stamina(float(move.get("stamina", HEAVY_COST if heavy else LIGHT_COST)))
+	_attack_move = move
+	_attack_name = &"heavy" if heavy else StringName("light%d" % (chain.find(move) + 1))
+	_attack_unarmed = _weapon_holstered
 	_attack_phase = 0
 	_attack_phase_time = 0.0
 	_attack_hit_once = false
+	_lunge_v0 = 0.0
+	_lunge_t = 0.0
 	_sprinting = false
 	_hit_this_swing.clear()
 	_auto_aim()
 	_set_state(State.ATTACK)
-	Audio.play_sfx(&"swing_heavy" if heavy else &"swing_light", global_position + Vector3.UP * 0.7)
+	Audio.play_sfx(move.get("sfx", &"swing_heavy" if heavy else &"swing_light"), global_position + Vector3.UP * 0.7)
 	return true
 
 
+## The move resolved at attack start (ChoreoLibrary data).
 func _attack_data() -> Dictionary:
-	return ATTACKS.get(_attack_name, ATTACKS[&"light1"])
+	return _attack_move
+
+
+func get_attack_move() -> Dictionary:
+	return _attack_move if state == State.ATTACK else {}
 
 
 func _auto_aim() -> void:
@@ -924,6 +1076,7 @@ func _auto_aim() -> void:
 					target = e
 		if target == null and wish.length() > 0.2:
 			_facing_yaw = atan2(-fwd.x, -fwd.z)
+	_lunge_target = target
 	if target:
 		var to2 := target.global_position - global_position
 		if Vector2(to2.x, to2.z).length_squared() > 0.0001:
@@ -935,6 +1088,7 @@ func _update_attack(delta: float) -> void:
 	var d := _attack_data()
 	_attack_phase_time += delta
 	var heavy := _attack_name == &"heavy"
+	var fw: Dictionary = d.get("footwork", {})
 	var h := Vector3(velocity.x, 0.0, velocity.z)
 	match _attack_phase:
 		0:  # windup: slide to a stop, then hold the anticipation pose
@@ -946,19 +1100,27 @@ func _update_attack(delta: float) -> void:
 				_attack_phase = 1
 				_attack_phase_time = 0.0
 				_begin_active(d, heavy)
-				h = get_facing() * float(d["lunge"])
+				# Footwork: the move's lunge distance is covered ONCE by body velocity
+				# (linear ramp-down over footwork.time); poses never translate the root.
+				_lunge_time = maxf(0.05, float(fw.get("time", 0.2)))
+				_lunge_v0 = 2.0 * float(fw.get("lunge", 0.0)) / _lunge_time
+				_lunge_t = 0.0
+				h = get_facing() * _lunge_v0
 		1:  # active: lunge, hitbox live
-			h = h.move_toward(Vector3.ZERO, 10.0 * delta)
+			h = get_facing() * _lunge_speed(delta)
 			if _attack_phase_time >= float(d["active"]):
 				_hitbox.deactivate()
 				_attack_phase = 2
 				_attack_phase_time = 0.0
 		2:  # recovery: can be cancelled by dodge or chained into the next light
-			h = h.move_toward(Vector3.ZERO, GROUND_DECEL * delta)
+			if _lunge_t < _lunge_time:
+				h = get_facing() * _lunge_speed(delta)
+			else:
+				h = h.move_toward(Vector3.ZERO, GROUND_DECEL * delta)
 			if _dodge_buffer > 0.0 and _start_dodge():
 				return
 			var rec := float(d["recovery"])
-			if _attack_buffer > 0.0 and _attack_phase_time >= rec * 0.25:
+			if _attack_buffer > 0.0 and _attack_phase_time >= rec * float(d.get("chain_open", 0.25)):
 				if _attack_buffer_heavy or (not heavy and _chain_index != 0):
 					_chain_reset = 0.6
 					if _start_attack(_attack_buffer_heavy):
@@ -973,14 +1135,35 @@ func _update_attack(delta: float) -> void:
 	velocity.z = h.z * _speed_mult()
 
 
+func _lunge_speed(delta: float) -> float:
+	_lunge_t += delta
+	for i in get_slide_collision_count():
+		var col := get_slide_collision(i).get_collider() as CollisionObject3D
+		if col and (col.collision_layer & Layers.ACTORS) != 0:
+			_lunge_v0 = 0.0  # body contact: plant, never slide around the opponent
+	if is_instance_valid(_lunge_target):
+		var to := _lunge_target.global_position - global_position
+		to.y = 0.0
+		if to.length() < LUNGE_STOP_GAP * _scale and to.dot(get_facing()) > 0.0:
+			return 0.0  # arrived: plant instead of sliding past/around the target
+	return _lunge_v0 * maxf(0.0, 1.0 - _lunge_t / _lunge_time)
+
+
 func _begin_active(d: Dictionary, heavy: bool) -> void:
 	var info := DamageInfo.make(Progression.attack_power() * float(d["mult"]), self, float(d["knock"]), float(d["stagger"]))
 	info.is_heavy = heavy
-	info.attack_id = _attack_name
-	_hitbox.setup(self, _heavy_shape() if heavy else _light_shape(), Vector3(0, 0.6, -0.95 if heavy else -0.85) * _scale)
-	_hitbox.activate(info, float(d["active"]))
-	PlayerFx.swing_arc(self, _facing_pivot.global_transform, _attack_name, _scale)
-	if heavy and Progression.has_unlock(&"shockwave_slam"):
+	info.attack_id = d.get("attack_id", _attack_name)
+	if d.has("projectile"):
+		_launch_projectile(d, info)
+	else:
+		# Hitbox = the move's authored weapon reach (scaled with the body), never padded.
+		var hb: Dictionary = d["hitbox"]
+		_hitbox.setup(self, _box_shape((hb["size"] as Vector3) * _scale), (hb["offset"] as Vector3) * _scale)
+		_hitbox.activate(info, float(d["active"]))
+	PlayerFx.trail(self, _facing_pivot.global_transform, d.get("trail", {}), _scale, float(d["active"]))
+	if d.has("projectile"):
+		return
+	if heavy and not _attack_unarmed and Progression.has_unlock(&"shockwave_slam"):
 		var sw := DamageInfo.make(Progression.attack_power() * 1.2, self, 7.0, 0.7)
 		sw.is_heavy = true
 		sw.attack_id = &"shockwave_slam"
@@ -990,6 +1173,24 @@ func _begin_active(d: Dictionary, heavy: bool) -> void:
 		PlayerFx.shockwave(self, center, SHOCKWAVE_RADIUS)
 		Audio.play_sfx(&"ogre_slam", center, -4.0)
 		GameFeel.shake(0.3)
+
+
+## Sling release: the stone leaves the pouch at the start of the active window,
+## toward the lock target (or facing), with a small loft against gravity.
+func _launch_projectile(d: Dictionary, info: DamageInfo) -> void:
+	var pr: Dictionary = d["projectile"]
+	var start := global_position + Vector3.UP * 0.62 * _scale + get_facing() * 0.25 * _scale
+	var from := model.get_release_point()
+	if from.distance_to(start) > 0.6 * _scale:
+		from = start
+	var dir := get_facing()
+	var lock := get_lock_target()
+	if lock:
+		var aim_at: Vector3 = lock.call("get_lock_point") if lock.has_method("get_lock_point") else lock.global_position + Vector3.UP * 0.6
+		dir = (aim_at - from).normalized()
+	dir = (dir + Vector3.UP * float(pr.get("loft", 0.05))).normalized()
+	var stone := ChoreoSlingStone.launch(self, from, dir, float(pr["speed"]), float(pr["range"]), info, float(pr.get("radius", 0.14)))
+	stone.hitbox.hit_landed.connect(_on_hit_landed)
 
 
 func _end_attack() -> void:
@@ -1096,6 +1297,9 @@ func _feed_model() -> void:
 	model.anim_speed = Vector2(velocity.x, velocity.z).length()
 	model.anim_vertical = velocity.y
 	model.anim_grounded = is_on_floor()
+	model.unarmed = _weapon_holstered
+	if model.weapon_type != _weapon_type:
+		model.set_weapon(_weapon_type)
 	model.anim_sprinting = _sprinting and state == State.MOVE
 	match state:
 		State.IDLE:
@@ -1106,7 +1310,8 @@ func _feed_model() -> void:
 			model.anim_state = &"air"
 		State.ATTACK:
 			model.anim_state = &"attack"
-			model.anim_action = _attack_name
+			model.anim_action = _attack_move.get("anim", _attack_name)
+			model.anim_move = _attack_move
 			var d := _attack_data()
 			var dur := float(d[PHASE_KEYS[_attack_phase]])
 			model.anim_phase = float(_attack_phase) + clampf(_attack_phase_time / maxf(dur, 0.001), 0.0, 1.0)
@@ -1117,6 +1322,7 @@ func _feed_model() -> void:
 			model.anim_state = &"block"
 		State.HURT:
 			model.anim_state = &"hurt"
+			model.anim_t = _state_time / maxf(_hurt_time, 0.01)
 		State.CAST:
 			model.anim_state = &"cast"
 			model.anim_t = _state_time / maxf(_cast_time, 0.01)

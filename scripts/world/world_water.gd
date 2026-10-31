@@ -9,6 +9,10 @@ var mat_depth: ShaderMaterial
 var mat_simple: ShaderMaterial
 var still_depth: ShaderMaterial
 var still_simple: ShaderMaterial
+var marsh_depth: ShaderMaterial
+var marsh_simple: ShaderMaterial
+var spring_depth: ShaderMaterial
+var spring_simple: ShaderMaterial
 var particles: Array[GPUParticles3D] = []
 var stats := {}
 
@@ -17,6 +21,10 @@ func build(world: Node3D) -> void:
 	name = "Water"
 	terrain = world.terrain
 	mat_depth = _water_mat("res://shaders/world/water.gdshader", 0.0)
+	marsh_depth = _murky(_water_mat("res://shaders/world/water.gdshader", 1.0))
+	marsh_simple = _murky(_water_mat("res://shaders/world/water_simple.gdshader", 1.0))
+	spring_depth = _clear(_water_mat("res://shaders/world/water.gdshader", 1.0))
+	spring_simple = _clear(_water_mat("res://shaders/world/water_simple.gdshader", 1.0))
 	mat_simple = _water_mat("res://shaders/world/water_simple.gdshader", 0.0)
 	still_depth = _water_mat("res://shaders/world/water.gdshader", 1.0)
 	still_simple = _water_mat("res://shaders/world/water_simple.gdshader", 1.0)
@@ -30,10 +38,33 @@ func build(world: Node3D) -> void:
 	apply_quality()
 
 
+func _murky(m: ShaderMaterial) -> ShaderMaterial:
+	m.set_shader_parameter("shallow_color", Color(0.11, 0.11, 0.06))
+	m.set_shader_parameter("deep_color", Color(0.035, 0.04, 0.02))
+	m.set_shader_parameter("foam_color", Color(0.36, 0.40, 0.26))
+	m.set_shader_parameter("depth_scale", 0.35)
+	m.set_shader_parameter("min_alpha", 0.82)
+	m.set_shader_parameter("roughness", 0.22)
+	m.set_shader_parameter("scum", 0.55)
+	return m
+
+
+func _clear(m: ShaderMaterial) -> ShaderMaterial:
+	m.set_shader_parameter("shallow_color", Color(0.34, 0.50, 0.44))
+	m.set_shader_parameter("deep_color", Color(0.08, 0.22, 0.24))
+	return m
+
+
 func _water_mat(path: String, still: float) -> ShaderMaterial:
 	var m := ShaderMaterial.new()
 	m.shader = load(path)
 	m.set_shader_parameter("still", still)
+	if still > 0.5:
+		m.set_shader_parameter("depth_scale", 0.45)
+		m.set_shader_parameter("roughness", 0.07)
+		m.set_shader_parameter("min_alpha", 0.7)
+		m.set_shader_parameter("shallow_color", Color(0.12, 0.17, 0.13))
+		m.set_shader_parameter("deep_color", Color(0.025, 0.06, 0.06))
 	m.render_priority = 1
 	return m
 
@@ -90,6 +121,84 @@ func _build_river() -> void:
 	var mi := _commit_water("River", v, nn, uv, uv2, idx)
 	_fix_winding(mi)
 	stats["river_vertices"] = v.size()
+
+
+## Rock form over the waterfall cliff: stepped strata ledges, overhangs,
+## a broken top edge, moss/fern tufts on ledges and scree at the base.
+func _cliff_form(top: float, pool: float, x0: float, z_lip: float) -> void:
+	var geo := WorldGeo.new()
+	var fgeo := WorldGeo.new()
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 8128
+	var body := StaticBody3D.new()
+	body.name = "CliffBody"
+	body.collision_layer = Layers.WORLD
+	body.collision_mask = 0
+	add_child(body)
+	var rock_col := Color(0.55, 0.54, 0.51)
+	var x := -40.0
+	while x < 105.0:
+		var w := rng.randf_range(5.0, 11.0)
+		var cx := x + w * 0.5
+		x += w * rng.randf_range(0.7, 0.9)
+		var behind_fall := absf(cx - x0) < 4.5
+		if absf(cx - WorldTerrain.NOOK.x) < 4.0:
+			continue
+		# find the cliff face: walk south from the top until the ground drops
+		var face_z := -214.0
+		for k in 30:
+			var zz := -218.0 + k * 0.5
+			if terrain.height_at(cx, zz) < top - 3.0:
+				face_z = zz
+				break
+		var base_y := terrain.height_at(cx, face_z + 5.0)
+		var ytop := terrain.height_at(cx, face_z - 4.0)
+		if ytop - base_y < 6.0:
+			continue
+		# stacked strata slabs, each stepping in/out a little
+		var y := base_y
+		var layer := 0
+		while y < ytop - 0.5:
+			var hgt := rng.randf_range(1.6, 5.5)
+			var out := rng.randf_range(-0.8, 1.0) + (1.0 if layer % 3 == 2 else 0.0)  # occasional overhang
+			if behind_fall:
+				out = -1.6
+			var p := Vector3(cx + rng.randf_range(-1.2, 1.2), y + hgt * 0.5, face_z - 0.9 + out * 0.5)
+			var b := Basis(Vector3.UP, rng.randf_range(-0.25, 0.25)).rotated(Vector3(1, 0, 0), rng.randf_range(-0.1, 0.12)).rotated(Vector3(0, 0, 1), rng.randf_range(-0.08, 0.08))
+			geo.rock(Transform3D(b, p), Vector3(w * rng.randf_range(0.5, 0.75), hgt * 0.6, 1.8 + out * 0.4), rock_col.darkened(rng.randf() * 0.2), cx * 3.1 + y * 1.7, 0.0, 1, 0.3)
+			# ledge tufts
+			if rng.randf() < 0.45:
+				var lp := p + Vector3(rng.randf_range(-w * 0.3, w * 0.3), hgt * 0.45, 0.8 + out * 0.4)
+				WorldFlora._cluster(fgeo, rng, lp, lp - Vector3(0, 1.0, 0), 0.9, 3, WorldTextures.CELL_FERN if rng.randf() < 0.5 else WorldTextures.CELL_SMALL, Color(0.8, 0.86, 0.72))
+			y += hgt * rng.randf_range(0.75, 0.95)
+			layer += 1
+		# broken top edge: a few crowning boulders
+		for k in 2:
+			var tp := Vector3(cx + rng.randf_range(-w * 0.4, w * 0.4), ytop + 0.4, face_z - 2.0 - rng.randf() * 2.0)
+			geo.rock(Transform3D(Basis(Vector3.UP, rng.randf() * TAU), tp), Vector3(rng.randf_range(1.2, 2.8), rng.randf_range(0.8, 1.6), rng.randf_range(1.2, 2.4)), rock_col, cx * 1.7 + k, 0.0)
+		# scree at the base
+		for k in 4:
+			var sp := Vector3(cx + rng.randf_range(-w * 0.5, w * 0.5), 0, face_z + rng.randf_range(1.5, 5.5))
+			if terrain.water_level_at(sp.x, sp.z) > -INF and terrain.height_at(sp.x, sp.z) < terrain.water_level_at(sp.x, sp.z) - 0.4:
+				continue
+			var s := rng.randf_range(0.4, 1.3)
+			sp.y = terrain.height_at(sp.x, sp.z) + s * 0.2
+			geo.rock(Transform3D(Basis(Vector3.UP, rng.randf() * TAU), sp), Vector3(s * 1.3, s * 0.7, s), rock_col.lightened(0.05), sp.x + sp.z, 0.0)
+			if s > 0.9:
+				var cs := CollisionShape3D.new()
+				var sph := SphereShape3D.new()
+				sph.radius = s * 0.7
+				cs.shape = sph
+				cs.position = sp
+				body.add_child(cs)
+	# ledge rocks flanking the main fall (the water splits around them)
+	for e: Array in [[x0 - 4.2, 0.35], [x0 + 4.4, 0.55], [x0 - 3.6, 0.75]]:
+		var ly := top - (top - pool) * float(e[1])
+		geo.rock(Transform3D(Basis(Vector3.UP, rng.randf()), Vector3(e[0], ly, z_lip + 1.4)), Vector3(2.0, 1.2, 1.8), rock_col.darkened(0.1), ly, 0.0)
+	var mi := geo.commit(self, "CliffForm", WorldTextures.rock_mat("rock_cliff", 0.55, 0.12, 0.5), true)
+	mi.visibility_range_end = 600.0
+	var fm := fgeo.commit(self, "CliffPlants", WorldTextures.leaf_mat("cliff", 0.6), true)
+	fm.visibility_range_end = 250.0
 
 
 ## Ensures every water triangle faces up (Godot front faces are clockwise).
@@ -157,8 +266,15 @@ func _disc(n: String, centre: Vector3, radius: float, segs: int, still: bool) ->
 
 
 func _build_pond() -> void:
-	var p := WorldTerrain.POND
-	_disc("Pond", Vector3(p.x, terrain.pond_level, p.z), WorldTerrain.POND_RADIUS + 1.2, 24, true)
+	for w: Dictionary in terrain.still:
+		var c: Vector3 = w["pos"]
+		var r: float = w["radius"]
+		var marsh: bool = w["kind"] == &"marsh"
+		var mi := _disc(String(w["id"]).capitalize().replace(" ", ""), Vector3(c.x, w["level"], c.z), r * 1.3 + 1.0, 40 if r > 10.0 else 28, true)
+		if marsh:
+			mi.set_meta("marsh", true)
+		elif w["kind"] == &"spring":
+			mi.set_meta("spring", true)
 
 
 # ------------------------------------------------------------------ waterfall
@@ -211,7 +327,7 @@ func _build_waterfall() -> void:
 	var foam := MeshInstance3D.new()
 	foam.name = "FallsFoam"
 	var q := PlaneMesh.new()
-	q.size = Vector2(16, 12)
+	q.size = Vector2(20, 15)
 	foam.mesh = q
 	var fm := ShaderMaterial.new()
 	fm.shader = load("res://shaders/world/foam_ring.gdshader")
@@ -221,7 +337,46 @@ func _build_waterfall() -> void:
 	foam.position = Vector3(x0, pool + 0.04, z_land + 1.5)
 	add_child(foam)
 	# mist + splash particles
-	particles.append(_mist(Vector3(x0, pool + 1.0, z_land + 1.0), 48, Vector3(5, 1, 3), 3.5, 2.6, Color(1, 1, 1, 0.22)))
+	_cliff_form(top, pool, x0, z_lip)
+	# secondary thin falls splitting off the ledges either side
+	for e: Array in [[x0 - 5.5, 0.45, 2.2], [x0 + 6.0, 0.62, 1.6]]:
+		var sx: float = e[0]
+		var st: float = e[1]
+		var sw: float = e[2]
+		var sy := top - (top - pool) * st * 0.3
+		var strip := WorldGeo.new()
+		var rows2 := 10
+		var pv: Array = []
+		for r2 in rows2 + 1:
+			var t2 := float(r2) / rows2
+			var y2 := sy - (sy - pool) * t2
+			var z2 := z_lip + 0.6 + t2 * 3.5
+			pv.append([Vector3(sx - sw * 0.5, y2, z2), Vector3(sx + sw * 0.5, y2, z2), t2])
+		var sv := PackedVector3Array()
+		var su := PackedVector2Array()
+		var sn := PackedVector3Array()
+		for r2 in rows2:
+			var a0: Array = pv[r2]
+			var a1: Array = pv[r2 + 1]
+			for qd: Array in [[a0[0], 0.0, a0[2]], [a0[1], 1.0, a0[2]], [a1[0], 0.0, a1[2]], [a0[1], 1.0, a0[2]], [a1[1], 1.0, a1[2]], [a1[0], 0.0, a1[2]]]:
+				sv.append(qd[0]); su.append(Vector2(qd[1], qd[2])); sn.append(Vector3(0, 0.3, 1).normalized())
+		var arr2 := []
+		arr2.resize(Mesh.ARRAY_MAX)
+		arr2[Mesh.ARRAY_VERTEX] = sv
+		arr2[Mesh.ARRAY_NORMAL] = sn
+		arr2[Mesh.ARRAY_TEX_UV] = su
+		var m2 := ArrayMesh.new()
+		m2.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr2)
+		var smi := MeshInstance3D.new()
+		smi.name = "SideFall"
+		smi.mesh = m2
+		smi.material_override = mi.material_override
+		smi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(smi)
+		strip = strip
+		particles.append(_mist(Vector3(sx, pool + 0.3, z_lip + 4.5), 14, Vector3(1.0, 0.2, 0.6), 1.0, 0.7, Color(1, 1, 1, 0.45), 3.0))
+	particles.append(_mist(Vector3(x0, pool + 1.0, z_land + 1.0), 70, Vector3(6, 1, 4), 4.0, 3.2, Color(1, 1, 1, 0.24)))
+	particles.append(_mist(Vector3(x0, pool + 3.5, z_land + 2.0), 30, Vector3(7, 2, 4), 5.0, 5.0, Color(0.95, 0.97, 1.0, 0.12)))
 	particles.append(_mist(Vector3(x0, pool + 0.3, z_land), 40, Vector3(4, 0.3, 1.5), 1.2, 0.9, Color(1, 1, 1, 0.55), 4.0))
 	particles.append(_mist(Vector3(x0, top - 1.0, z_lip + 0.8), 16, Vector3(3.5, 0.5, 0.5), 2.0, 1.6, Color(1, 1, 1, 0.18)))
 
@@ -421,13 +576,15 @@ func _build_areas() -> void:
 	pool.shape = cyl
 	pool.position = Vector3(pts[0].x, pts[0].y - 1.45, pts[0].z)
 	area.add_child(pool)
-	var pond := CollisionShape3D.new()
-	var cyl2 := CylinderShape3D.new()
-	cyl2.radius = WorldTerrain.POND_RADIUS
-	cyl2.height = 1.6
-	pond.shape = cyl2
-	pond.position = Vector3(WorldTerrain.POND.x, terrain.pond_level - 0.75, WorldTerrain.POND.z)
-	area.add_child(pond)
+	for w: Dictionary in terrain.still:
+		var c: Vector3 = w["pos"]
+		var sc := CollisionShape3D.new()
+		var cy := CylinderShape3D.new()
+		cy.radius = w["radius"]
+		cy.height = 1.6
+		sc.shape = cy
+		sc.position = Vector3(c.x, float(w["level"]) - 0.75, c.z)
+		area.add_child(sc)
 
 
 func _build_audio() -> void:
@@ -452,7 +609,12 @@ func apply_quality() -> void:
 	var q := Settings.quality()
 	for mi in water_meshes:
 		var still: bool = mi.get_meta("still", false)
-		if q >= 1:
+		var hi := q >= 1
+		if mi.get_meta("marsh", false):
+			mi.material_override = marsh_depth if hi else marsh_simple
+		elif mi.get_meta("spring", false):
+			mi.material_override = spring_depth if hi else spring_simple
+		elif hi:
 			mi.material_override = still_depth if still else mat_depth
 		else:
 			mi.material_override = still_simple if still else mat_simple

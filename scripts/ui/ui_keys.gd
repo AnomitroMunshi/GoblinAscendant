@@ -7,7 +7,7 @@ const ACTION_NAMES := {
 	&"move_forward": "Move forward", &"move_back": "Move back", &"move_left": "Move left",
 	&"move_right": "Move right", &"sprint": "Sprint", &"jump": "Jump",
 	&"attack_light": "Light attack", &"attack_heavy": "Heavy attack", &"dodge": "Dodge roll",
-	&"block": "Block", &"interact": "Interact", &"lock_on": "Lock on / release",
+	&"holster": "Draw / holster weapon", &"block": "Block", &"interact": "Interact", &"lock_on": "Lock on / release",
 	&"target_next": "Next target", &"target_prev": "Previous target",
 	&"ability_1": "Ability 1", &"ability_2": "Ability 2", &"ability_3": "Ability 3",
 	&"camera_reset": "Reset camera", &"character_menu": "Character", &"pause": "Pause menu",
@@ -15,7 +15,7 @@ const ACTION_NAMES := {
 }
 const CONTROL_ORDER := [
 	&"move_forward", &"move_back", &"move_left", &"move_right", &"sprint", &"jump",
-	&"attack_light", &"attack_heavy", &"block", &"dodge", &"interact", &"lock_on",
+	&"attack_light", &"attack_heavy", &"holster", &"block", &"dodge", &"interact", &"lock_on",
 	&"target_next", &"target_prev", &"ability_1", &"ability_2", &"ability_3",
 	&"camera_reset", &"character_menu", &"pause", &"quick_save", &"quick_load",
 ]

@@ -26,7 +26,7 @@ var _poly := PackedVector2Array()
 
 func _init() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	custom_minimum_size = Vector2(76, SLOT + 22)
+	custom_minimum_size = Vector2(88, SLOT + 22)
 
 
 func _ready() -> void:

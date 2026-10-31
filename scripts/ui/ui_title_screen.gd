@@ -26,7 +26,7 @@ func _ready() -> void:
 	col.add_child(t)
 	var sub := UiTheme.label("Chapter 1 — A Small Beginning", &"SectionLabel", 26)
 	sub.add_theme_color_override(&"font_color", Color(0.93, 0.88, 0.76))
-	sub.add_theme_constant_override(&"outline_size", 5)
+	sub.add_theme_constant_override(&"outline_size", 2)
 	col.add_child(sub)
 	var line := ColorRect.new()
 	line.color = Color(UiTheme.GOLD, 0.6)

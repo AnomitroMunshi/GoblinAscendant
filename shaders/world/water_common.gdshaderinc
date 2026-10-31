@@ -3,11 +3,16 @@
 // from UV2.x (0 = channel centre, 1 = bank) so no depth/screen reads happen.
 render_mode blend_mix, depth_draw_opaque, cull_back, diffuse_lambert, specular_schlick_ggx;
 
-uniform vec3 shallow_color : source_color = vec3(0.30, 0.72, 0.70);
-uniform vec3 deep_color : source_color = vec3(0.07, 0.30, 0.42);
-uniform vec3 foam_color : source_color = vec3(0.95, 0.98, 1.0);
+uniform vec3 shallow_color : source_color = vec3(0.22, 0.36, 0.30);
+uniform vec3 deep_color : source_color = vec3(0.03, 0.10, 0.12);
+uniform vec3 foam_color : source_color = vec3(0.82, 0.86, 0.84);
 uniform float flow_speed = 0.6;
 uniform float still = 0.0;   // 1 = pond / pool (no directional flow)
+uniform float depth_scale = 1.8;  // depth (m) at which the deep colour is reached
+uniform float min_alpha = 0.45;
+uniform float roughness = 0.06;
+uniform float scum = 0.0;   // marsh: patches of floating algae / duckweed
+uniform vec3 scum_color : source_color = vec3(0.24, 0.30, 0.12);
 #ifdef USE_DEPTH
 uniform sampler2D depth_tex : hint_depth_texture, filter_linear, repeat_disable;
 #endif
@@ -45,7 +50,8 @@ void fragment() {
 	float e = 0.15;
 	float wx = wave(fp + vec2(e, 0.0), tt) - w0;
 	float wy = wave(fp + vec2(0.0, e), tt) - w0;
-	vec3 nrm_w = normalize(vec3(-wx * 3.0, 1.0, -wy * 3.0));
+	float ripple = mix(3.0, 0.9, still);
+	vec3 nrm_w = normalize(vec3(-wx * ripple, 1.0, -wy * ripple));
 	NORMAL = normalize((VIEW_MATRIX * vec4(nrm_w, 0.0)).xyz);
 
 	float bank = clamp(UV2.x, 0.0, 1.0);
@@ -58,7 +64,7 @@ void fragment() {
 	vec3 scene_w = (INV_VIEW_MATRIX * vec4(vpos.xyz, 1.0)).xyz;
 	depth = clamp(wpos.y - scene_w.y, 0.0, 6.0);
 #endif
-	float dt = smoothstep(0.0, 1.8, depth);
+	float dt = smoothstep(0.0, depth_scale, depth);
 	vec3 col = mix(shallow_color, deep_color, dt);
 	// flow streaks
 	float streak = smoothstep(0.62, 0.9, vnoise(fp * vec2(0.18, 1.4) + vec2(-t * 1.3, 0.0)));
@@ -66,15 +72,25 @@ void fragment() {
 	// foam lines along the banks / around rocks
 	float fn = vnoise(fp * 1.6 + vec2(-t * 1.5, 0.0));
 	float foam = smoothstep(0.42, 0.05, depth + (fn - 0.5) * 0.35);
-	col = mix(col, foam_color, foam * 0.85);
+	foam *= 1.0 - still * 0.85;  // ponds and lakes: no bright rim
+	col = mix(col, foam_color, foam * 0.55);
 	// sparkles: tiny bright glints, stronger at grazing angles
 	float fres = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 4.0);
 	float sp = vnoise(fp * 6.0 + vec2(-t * 2.2, t * 0.7)) * vnoise(fp * 7.3 - vec2(t * 1.1, 0.0));
-	float sparkle = smoothstep(0.62, 0.75, sp);
+	float sparkle = smoothstep(0.70, 0.80, sp) * 0.6;
+	float sc = 0.0;
+	if (scum > 0.0) {
+		float sn = vnoise(wpos.xz * 0.35) * 0.65 + vnoise(wpos.xz * 1.7) * 0.35;
+		sc = smoothstep(0.62 - scum * 0.3, 0.72 - scum * 0.3, sn) * smoothstep(0.0, 0.25, depth + 0.1);
+		col = mix(col, scum_color * (0.8 + 0.4 * vnoise(wpos.xz * 6.0)), sc);
+		sparkle *= 1.0 - sc;
+	}
+	// fresnel: darker looking straight down, sky reflection at grazing angles
+	col *= mix(0.65, 1.0, fres);
 	ALBEDO = col;
-	EMISSION = foam_color * sparkle * 1.2 + col * 0.05;
-	ROUGHNESS = 0.06;
+	EMISSION = foam_color * sparkle * 0.6;
+	ROUGHNESS = mix(roughness, 0.95, sc);
 	METALLIC = 0.0;
-	SPECULAR = 0.6;
-	ALPHA = clamp(mix(0.55, 0.92, dt) + foam * 0.3 + fres * 0.15, 0.0, 1.0);
+	SPECULAR = mix(mix(0.55, 0.35, still), 0.05, sc);
+	ALPHA = clamp(mix(min_alpha, 0.95, dt) + foam * 0.2 + fres * 0.25 + sc, 0.0, 1.0);
 }

@@ -12,6 +12,15 @@ var _legs: Array[Node3D] = []   # FL, FR, BL, BR
 var _howl_time := 0.0
 var _is_alpha := false
 
+## Choreography data. legs = [front-left, front-right, back-left, back-right] hip pitch
+## (+ = swing forward). body_y = torso height, body_x = torso pitch (+ = nose up).
+const POSES := {
+	"crouch": {"body_y": 0.42, "body_x": 0.18, "head_x": -0.25, "tail_x": 0.8, "legs": [-0.5, -0.5, 0.6, 0.6], "rate": 14.0},
+	"lunge":  {"body_y": 0.75, "body_x": -0.2, "head_x": 0.35, "tail_x": 0.3, "legs": [1.1, 1.1, -1.0, -1.0], "rate": 30.0},
+	"hurt":   {"body_x": 0.2, "head_x": 0.5},
+	"howl":   {"body_y": 0.6, "body_x": 0.25, "head_x": 0.9},
+}
+
 
 func _default_type() -> StringName:
 	return &"wolf"
@@ -139,28 +148,32 @@ func _animate(delta: float) -> void:
 			var k := clampf(_phase_time / maxf(current_attack.windup, 0.01), 0.0, 1.0) if attack_phase == Phase.WINDUP else 1.0
 			if attack_phase == Phase.WINDUP:
 				# crouch, haunches down, head low, tail rigid
-				body_y = 0.62 - 0.2 * k
-				body_x = 0.18 * k
-				head_x = -0.25 * k
-				tail_x = 0.8
-				legs = [-0.5 * k, -0.5 * k, 0.6 * k, 0.6 * k]
+				var c: Dictionary = POSES["crouch"]
+				var cl: Array = c["legs"]
+				body_y = lerpf(0.62, float(c["body_y"]), k)
+				body_x = float(c["body_x"]) * k
+				head_x = float(c["head_x"]) * k
+				tail_x = c["tail_x"]
+				legs = [float(cl[0]) * k, float(cl[1]) * k, float(cl[2]) * k, float(cl[3]) * k]
+				r = 1.0 - exp(-float(c["rate"]) * delta)
 			else:
-				body_y = 0.75
-				body_x = -0.2
-				head_x = 0.35
-				legs = [1.1, 1.1, -1.0, -1.0]
-				r = 1.0 - exp(-30.0 * delta)
+				var l: Dictionary = POSES["lunge"]
+				body_y = l["body_y"]
+				body_x = l["body_x"]
+				head_x = l["head_x"]
+				legs = (l["legs"] as Array).duplicate()
+				r = 1.0 - exp(-float(l["rate"]) * delta)
 		State.RECOVER:
 			head_x = 0.1
 		State.HURT:
-			body_x = 0.2
-			head_x = 0.5
+			body_x = POSES["hurt"]["body_x"]
+			head_x = POSES["hurt"]["head_x"]
 		State.IDLE, State.INVESTIGATE:
 			head_x = sin(_time * 0.7) * 0.15
 	if _howl_time > 0.0:
-		body_x = 0.25
-		head_x = 0.9
-		body_y = 0.6
+		body_x = POSES["howl"]["body_x"]
+		head_x = POSES["howl"]["head_x"]
+		body_y = POSES["howl"]["body_y"]
 	_body.position.y = lerpf(_body.position.y, body_y, r)
 	_body.rotation.x = lerpf(_body.rotation.x, body_x, r)
 	_head.rotation.x = lerpf(_head.rotation.x, head_x, r)

@@ -17,8 +17,11 @@ const CHUNK_CELLS := 32
 const RIVER_HW := WorldLayout.RIVER_WIDTH * 0.5
 const POOL_RADIUS := 13.0
 const NOOK := Vector3(18, 0, -210)  # small alcove beside the falls (secret)
-const POND := Vector3(14, 0, 160)
-const POND_RADIUS := 6.0
+## Glade pond (first entry of WorldLayout.STILL_WATERS), kept for convenience.
+const POND := Vector3(30, 0, 182)
+const POND_RADIUS := 7.0
+## Max depth per still-water kind (all wadeable; no swimming exists).
+const STILL_DEPTH := {&"pond": 0.7, &"spring": 0.55, &"lake": 0.7, &"marsh": 0.4}
 
 ## Diagonal used to split each grid cell into two triangles.
 ## false: diagonal (i+1,j)-(i,j+1) -- verified to match both Godot Physics
@@ -28,7 +31,7 @@ var diag_main := false
 # Hills: x, z, height, sigma
 const HILLS := [
 	[-25.0, -5.0, 17.0, 30.0],    # overlook
-	[-185.0, -70.0, 15.0, 38.0],
+	[-205.0, -20.0, 12.0, 30.0],
 	[-60.0, 55.0, 6.0, 26.0],
 	[145.0, 55.0, 9.0, 32.0],
 	[195.0, 150.0, 13.0, 30.0],
@@ -42,10 +45,16 @@ const HILLS := [
 
 var heights := PackedFloat32Array()
 var normals := PackedVector3Array()
-var attrs := PackedColorArray()        # r dirt, g sand, b meadow, a forest
+var attrs := PackedColorArray()        # r dirt, g shore, b meadow, a forest
+var mud := PackedFloat32Array()         # mud / wet ground weight
 var river_d := PackedFloat32Array()     # distance to river centre (<= 40 m band, else big)
 var river_k := PackedFloat32Array()     # arc-length of the closest centre-line point
 var path_d := PackedFloat32Array()
+var still_d := PackedFloat32Array()     # signed distance to still water edge (<0 inside)
+## Still waters: [{id, kind, pos, radius, level, depth}] (from WorldLayout.STILL_WATERS)
+var still: Array = []
+## Side trails to the spring / marsh / lake: [[Vector3 a, Vector3 b], ...]
+var trails: Array = []
 var valley_d := PackedFloat32Array()    # distance to the raw river polyline (wide band)
 
 var river_pts := PackedVector3Array()   # smoothed centre line, y = water level
@@ -59,6 +68,7 @@ var falls_top := 0.0
 var _nb: FastNoiseLite
 var _nd: FastNoiseLite
 var _nr: FastNoiseLite
+var _nm: FastNoiseLite   # broad mountain massifs (low frequency, ridged)
 var _nf: FastNoiseLite
 var _flats: Array = []   # [x, z, r_in, r_out, level]
 var _cave_dir := Vector2.ZERO
@@ -72,6 +82,9 @@ func _init() -> void:
 	_nd = _noise(4242, 0.035, 2)
 	_nr = _noise(777, 0.006, 5)
 	_nr.fractal_type = FastNoiseLite.FRACTAL_RIDGED
+	_nm = _noise(31337, 0.0022, 5)
+	_nm.fractal_type = FastNoiseLite.FRACTAL_RIDGED
+	_nm.fractal_gain = 0.45
 	_nf = _noise(9001, 0.011, 3)
 	var e := Vector2(WorldLayout.CAVE_ENTRANCE.x, WorldLayout.CAVE_ENTRANCE.z)
 	var i := Vector2(WorldLayout.CAVE_INTERIOR.x, WorldLayout.CAVE_INTERIOR.z)
@@ -128,13 +141,13 @@ func _build_river_line() -> void:
 	var lv := PackedFloat32Array()
 	lv.resize(out.size())
 	for i in out.size():
-		var acc := 0.0
+		var sum := 0.0
 		var wsum := 0.0
 		for k in range(maxi(i - 12, 0), mini(i + 13, out.size())):
 			var wgt := 1.0 - absf(k - i) / 13.0
-			acc += nat[k] * wgt
+			sum += nat[k] * wgt
 			wsum += wgt
-		lv[i] = acc / wsum - 1.3
+		lv[i] = sum / wsum - 1.3
 	for i in range(1, out.size()):
 		lv[i] = minf(lv[i], lv[i - 1] - 0.004 * (river_s[i] - river_s[i - 1]))
 	for i in out.size():
@@ -176,6 +189,9 @@ func _rasterize_distances() -> void:
 	for path: Array in WorldLayout.PATHS:
 		for i in path.size() - 1:
 			_raster_seg(path[i], path[i + 1], 10.0, 0, 0.0, 0.0)
+	_setup_trails()
+	for tr: Array in trails:
+		_raster_seg(tr[0], tr[1], 10.0, 0, 0.0, 0.0)
 	var rp: Array = WorldLayout.RIVER_POINTS
 	for i in rp.size() - 1:
 		_raster_seg(rp[i], rp[i + 1], 130.0, 2, 0.0, 0.0)
@@ -210,6 +226,29 @@ func _raster_seg(a3: Vector3, b3: Vector3, band: float, mode: int, sa: float, sb
 					river_k[idx] = lerpf(sa, sb, t)
 			elif d < valley_d[idx]:
 				valley_d[idx] = d
+
+
+## Short dirt trails from the nearest main path to the spring, marsh and lake.
+func _setup_trails() -> void:
+	for w: Dictionary in WorldLayout.STILL_WATERS:
+		if not (w["kind"] in [&"spring", &"marsh", &"lake"]):
+			continue
+		var c: Vector3 = w["pos"]
+		var best := INF
+		var bp := Vector3.ZERO
+		for path: Array in WorldLayout.PATHS:
+			for i in path.size() - 1:
+				var q := Geometry3D.get_closest_point_to_segment(c, path[i], path[i + 1])
+				var d := q.distance_to(c)
+				if d < best:
+					best = d
+					bp = q
+		var dir := (bp - c).normalized()
+		var end := c + dir * (float(w["radius"]) + 1.5)
+		# one gentle bend so it doesn't read as a ruler line
+		var mid := bp.lerp(end, 0.5) + Vector3(-dir.z, 0, dir.x) * best * 0.12
+		trails.append([bp, mid])
+		trails.append([mid, end])
 
 
 func _setup_flats() -> void:
@@ -283,15 +322,15 @@ func _border(x: float, z: float) -> float:
 	var b := dd - edge
 	if b <= 0.0:
 		return 0.0
-	var ridge := (_nr.get_noise_2d(x, z) * 0.5 + 0.5)
-	var hh := 70.0 * smoothstep(0.0, 60.0, b) + ridge * 55.0 * smoothstep(10.0, 90.0, b) + maxf(0.0, b - 60.0) * 0.3
+	var ridge := (_nr.get_noise_2d(x, z) * 0.5 + 0.5) * 0.35 + (_nm.get_noise_2d(x, z) * 0.5 + 0.5) * 0.65
+	var hh := 58.0 * smoothstep(0.0, 120.0, b) + pow(ridge, 1.35) * 115.0 * smoothstep(25.0, 170.0, b) + maxf(0.0, b - 120.0) * 0.3
 	# Lower the ridge where the overlook looks at the distant castle.
-	var notch := _castle_notch(x, z)
+	var notch := castle_notch(x, z)
 	if notch > 0.0:
 		var p := Vector2(x, z)
 		var t := clampf((p - _castle_line_a).dot(_castle_line_b - _castle_line_a) / _castle_line_a.distance_squared_to(_castle_line_b), 0.0, 1.0)
-		var los := lerpf(26.0, WorldLayout.CASTLE_LANDMARK.y, t) - 14.0
-		hh = lerpf(hh, minf(hh, los - 4.0 - _border_base(x, z)), notch)
+		var los := lerpf(8.0, WorldLayout.CASTLE_LANDMARK.y - 60.0, minf(t, 1.0))
+		hh = lerpf(hh, minf(hh, los - _border_base(x, z)), notch)
 	return hh
 
 
@@ -299,14 +338,14 @@ func _border_base(_x: float, _z: float) -> float:
 	return 4.0
 
 
-func _castle_notch(x: float, z: float) -> float:
+func castle_notch(x: float, z: float) -> float:
 	if z > -150.0:
 		return 0.0
 	var p := Vector2(x, z)
 	var ab := _castle_line_b - _castle_line_a
-	var t := clampf((p - _castle_line_a).dot(ab) / ab.length_squared(), 0.0, 1.0)
+	var t := clampf((p - _castle_line_a).dot(ab) / ab.length_squared(), 0.0, 1.25)
 	var d := p.distance_to(_castle_line_a + ab * t)
-	return (1.0 - smoothstep(40.0, 110.0, d)) * (1.0 - smoothstep(0.92, 0.99, t))
+	return 1.0 - smoothstep(60.0, 150.0, d)
 
 
 func _cliff(x: float, z: float) -> float:
@@ -372,18 +411,69 @@ func _carve_river(idx: int, x: float, z: float, h: float) -> float:
 	return out
 
 
-func _carve_pond(x: float, z: float, h: float) -> float:
-	var d := Vector2(x - POND.x, z - POND.z).length()
-	if d > POND_RADIUS + 6.0:
-		return h
-	var t := d / POND_RADIUS
-	var prof := pond_level - 1.0 * (1.0 - t * t) + 0.1 if d < POND_RADIUS else pond_level + 0.12 + (d - POND_RADIUS) * 0.1
-	return lerpf(prof, h, smoothstep(POND_RADIUS, POND_RADIUS + 6.0, d))
+func _setup_still() -> void:
+	still.clear()
+	for w: Dictionary in WorldLayout.STILL_WATERS:
+		var c: Vector3 = w["pos"]
+		var kind: StringName = w["kind"]
+		var r := float(w["radius"])
+		# level from the flattened ground around the rim (not just the centre)
+		var lv := _flatten(c.x, c.z, _natural(c.x, c.z))
+		for k in 8:
+			var a := TAU * k / 8.0
+			var px := c.x + cos(a) * r
+			var pz := c.z + sin(a) * r
+			lv = minf(lv, _flatten(px, pz, _natural(px, pz)) + 0.4)
+		var level := lv - (0.15 if kind == &"marsh" else 0.3)
+		still.append({"id": w["id"], "kind": kind, "pos": c, "radius": r, "level": level,
+			"depth": float(STILL_DEPTH.get(kind, 0.6))})
+	pond_level = still[0]["level"] if not still.is_empty() else 0.0
+
+
+## Effective shoreline radius: wobbles +-15% so basins aren't perfect circles.
+func still_radius(w: Dictionary, x: float, z: float) -> float:
+	var c: Vector3 = w["pos"]
+	var r: float = w["radius"]
+	var a := atan2(z - c.z, x - c.x)
+	var wob := _nd.get_noise_2d(cos(a) * 60.0 + c.x, sin(a) * 60.0 + c.z) * 0.22 + sin(a * 3.0 + c.x) * 0.05
+	return r * (1.0 + wob)
+
+
+## Shallow basin with a gentle shore. Marsh: hummocky mud with water between.
+func _carve_still(x: float, z: float, h: float) -> float:
+	for w: Dictionary in still:
+		var c: Vector3 = w["pos"]
+		var r: float = w["radius"]
+		if Vector2(x - c.x, z - c.z).length() > r * 1.3 + 6.0 + r * 0.4:
+			continue
+		r = still_radius(w, x, z)
+		var band := 6.0 + r * 0.4
+		var d := Vector2(x - c.x, z - c.z).length()
+		if d > r + band:
+			continue
+		var level: float = w["level"]
+		var depth: float = w["depth"]
+		var prof: float
+		if w["kind"] == &"marsh":
+			var hum := _nd.get_noise_2d(x * 2.2, z * 2.2) * 0.55 + _nb.get_noise_2d(x * 4.0, z * 4.0) * 0.25
+			var t := d / r
+			prof = level - depth * (1.0 - t * t) + maxf(hum, -0.1) + 0.05 * t
+			prof = minf(prof, level + 0.35)
+		elif d < r:
+			var t := d / r
+			prof = level - depth * (1.0 - t * t) + 0.12 * t * t * t
+		else:
+			prof = level + 0.12 + (d - r) * 0.12
+		h = lerpf(prof, h, smoothstep(r, r + band, d))
+		if d >= r and w["kind"] != &"marsh":
+			h = maxf(h, level + 0.1)
+	return h
 
 
 func _generate_heights() -> void:
 	heights.resize(RES * RES)
-	pond_level = _flatten(POND.x, POND.z, _natural(POND.x, POND.z)) - 0.35
+	_setup_still()
+	still_d.resize(RES * RES)
 	for j in RES:
 		var z := -HALF + j * CELL
 		var row := j * RES
@@ -393,7 +483,13 @@ func _generate_heights() -> void:
 			var h := _natural(x, z, valley_d[idx])
 			h = _flatten(x, z, h)
 			h = _carve_river(idx, x, z, h)
-			h = _carve_pond(x, z, h)
+			h = _carve_still(x, z, h)
+			var sd := 1e6
+			for w: Dictionary in still:
+				var c: Vector3 = w["pos"]
+				var dc := Vector2(x - c.x, z - c.z).length()
+				sd = minf(sd, dc - (still_radius(w, x, z) if dc < float(w["radius"]) * 1.4 + 12.0 else float(w["radius"])))
+			still_d[idx] = sd
 			h += _cliff(x, z)
 			h = _cave(x, z, h)
 			heights[idx] = h
@@ -445,11 +541,13 @@ func forest_density(x: float, z: float) -> float:
 
 func _compute_attrs() -> void:
 	attrs.resize(RES * RES)
+	mud.resize(RES * RES)
 	var L := WorldLayout
 	var dirt_discs := [
 		[L.ADVENTURER_CAMP, 15.0, 0.7], [L.RAIDER_OUTPOST, 18.0, 0.8], [L.RESCUE_SITE, 13.0, 0.75],
 		[L.OGRE_CLEARING, L.OGRE_ARENA_RADIUS - 3.0, 1.0], [L.ALPHA_WOLF_DEN, 10.0, 0.55],
-		[L.CAVE_ENTRANCE, 7.0, 0.6], [L.CAVE_INTERIOR, 14.0, 0.85], [L.RUINS_SHRINE, 4.0, 0.4],
+		[L.CAVE_ENTRANCE, 7.0, 0.6], [L.CAVE_INTERIOR, 14.0, 0.85], [L.RUINS_SHRINE, 9.0, 0.5],
+		[Vector3(-64, 0, -70), 4.0, 0.42], [Vector3(-104, 0, -78), 4.0, 0.42], [Vector3(-68, 0, -96), 6.0, 0.45],
 	]
 	for j in RES:
 		var z := -HALF + j * CELL
@@ -468,24 +566,40 @@ func _compute_attrs() -> void:
 			if rd < 30.0:
 				var hw := river_half_width(river_k[idx])
 				sand = 1.0 - smoothstep(hw + 0.5, hw + 4.0 + (3.0 if river_k[idx] < 25.0 else 0.0), rd)
-			var pdist := Vector2(x - POND.x, z - POND.z).length()
-			sand = maxf(sand, 1.0 - smoothstep(POND_RADIUS - 0.5, POND_RADIUS + 2.0, pdist))
+			var sdist := still_d[idx]
+			var marsh := 0.0
+			if sdist < 12.0:
+				for w: Dictionary in still:
+					var c: Vector3 = w["pos"]
+					var dd := Vector2(x - c.x, z - c.z).length() - still_radius(w, x, z)
+					if dd > 12.0:
+						continue
+					if w["kind"] == &"marsh":
+						marsh = maxf(marsh, 1.0 - smoothstep(-2.0, 10.0, dd))
+					elif w["kind"] != &"spring":
+						sand = maxf(sand, (1.0 - smoothstep(-0.5, 2.2, dd)) * (0.85 if w["kind"] == &"lake" else 0.6))
+			var wet := marsh * (0.75 + 0.35 * _nd.get_noise_2d(x * 1.7, z * 1.7))
+			if rd < 30.0:
+				var hw2 := river_half_width(river_k[idx])
+				wet = maxf(wet, (1.0 - smoothstep(hw2 + 2.0, hw2 + 7.0, rd)) * 0.35 * (0.5 + _nd.get_noise_2d(x * 0.9, z * 0.9)))
+			mud[idx] = wet
 			var g := L.START_GLADE
 			var gd := Vector2(x - g.x, z - g.z).length()
 			var meadow := 1.0 - smoothstep(18.0, 46.0, gd)
-			var forest := forest_density(x, z)
+			var forest := maxf(forest_density(x, z), marsh)
 			attrs[idx] = Color(dirt, sand, meadow, forest)
 
 
 func _build_meshes() -> void:
-	var mat := WorldGeo.shader_mat("res://shaders/world/terrain.gdshader")
+	var mat := WorldTextures.terrain_mat()
 	var vpc := CHUNK_CELLS + 1
 	for cj in CHUNKS:
 		for ci in CHUNKS:
 			var v := PackedVector3Array()
 			var nn := PackedVector3Array()
 			var cc := PackedColorArray()
-			v.resize(vpc * vpc); nn.resize(vpc * vpc); cc.resize(vpc * vpc)
+			var u2 := PackedVector2Array()
+			v.resize(vpc * vpc); nn.resize(vpc * vpc); cc.resize(vpc * vpc); u2.resize(vpc * vpc)
 			for lj in vpc:
 				var j := cj * CHUNK_CELLS + lj
 				for li in vpc:
@@ -495,6 +609,7 @@ func _build_meshes() -> void:
 					v[k] = Vector3(-HALF + i * CELL, heights[g], -HALF + j * CELL)
 					nn[k] = normals[g]
 					cc[k] = attrs[g]
+					u2[k] = Vector2(mud[g], 0.0)
 			var idx := PackedInt32Array()
 			idx.resize(CHUNK_CELLS * CHUNK_CELLS * 6)
 			var w := 0
@@ -517,6 +632,7 @@ func _build_meshes() -> void:
 			arr[Mesh.ARRAY_VERTEX] = v
 			arr[Mesh.ARRAY_NORMAL] = nn
 			arr[Mesh.ARRAY_COLOR] = cc
+			arr[Mesh.ARRAY_TEX_UV2] = u2
 			arr[Mesh.ARRAY_INDEX] = idx
 			var mesh := ArrayMesh.new()
 			mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
@@ -613,9 +729,64 @@ func water_level_at(x: float, z: float) -> float:
 		var idx := j * RES + i
 		if river_d[idx] < river_half_width(river_k[idx]) + 0.5:
 			return river_level_at_s(river_k[idx])
-	if Vector2(x - POND.x, z - POND.z).length() < POND_RADIUS:
-		return pond_level
+	for w: Dictionary in still:
+		var c: Vector3 = w["pos"]
+		if Vector2(x - c.x, z - c.z).length() < still_radius(w, x, z) and height_at(x, z) < float(w["level"]):
+			return w["level"]
 	return -INF
+
+
+## Signed distance to the nearest still-water edge (negative inside).
+func still_distance(x: float, z: float) -> float:
+	return _sample(still_d, x, z, 1e6)
+
+
+func get_still(id: StringName) -> Dictionary:
+	for w: Dictionary in still:
+		if w["id"] == id:
+			return w
+	return {}
+
+
+# ------------------------------------------------------------------ outer ring grid
+const OUTER_STEP := 16.0
+const OUTER_EXT := 1104.0
+var outer_n := 0
+var outer_h := PackedFloat32Array()
+
+
+## Coarse grid used by the distant ring mesh (and to seat outer trees on it).
+func build_outer_grid() -> void:
+	outer_n = int(OUTER_EXT * 2.0 / OUTER_STEP) + 1
+	outer_h.resize(outer_n * outer_n)
+	for j in outer_n:
+		var z := -OUTER_EXT + j * OUTER_STEP
+		for i in outer_n:
+			var x := -OUTER_EXT + i * OUTER_STEP
+			var h: float
+			if absf(x) < 257.0 and absf(z) < 257.0:
+				h = height_at(clampf(x, -255.9, 255.9), clampf(z, -255.9, 255.9)) - 2.5
+			else:
+				h = outer_height(x, z)
+			outer_h[j * outer_n + i] = h
+
+
+## Height of the rendered ring mesh (same triangle split as the mesh).
+func ring_height(x: float, z: float) -> float:
+	var fx := clampf((x + OUTER_EXT) / OUTER_STEP, 0.0, outer_n - 1.001)
+	var fz := clampf((z + OUTER_EXT) / OUTER_STEP, 0.0, outer_n - 1.001)
+	var i := int(fx)
+	var j := int(fz)
+	var tx := fx - i
+	var tz := fz - j
+	var g := j * outer_n + i
+	var h00 := outer_h[g]
+	var h10 := outer_h[g + 1]
+	var h01 := outer_h[g + outer_n]
+	var h11 := outer_h[g + outer_n + 1]
+	if tx + tz <= 1.0:
+		return h00 + (h10 - h00) * tx + (h01 - h00) * tz
+	return h11 + (h01 - h11) * (1.0 - tx) + (h10 - h11) * (1.0 - tz)
 
 
 ## Analytic shape of the distant ring (no collision) incl. castle mountain.
@@ -623,9 +794,9 @@ func outer_height(x: float, z: float) -> float:
 	var h := _natural(x, z)
 	var c := WorldLayout.CASTLE_LANDMARK
 	var dc := Vector2(x - c.x, z - c.z).length()
-	if dc < 400.0:
-		var peak := (c.y - 3.0) * (1.0 - smoothstep(25.0, 190.0, dc)) + _nd.get_noise_2d(x, z) * 3.0
-		peak = (c.y - 3.0) if dc < 30.0 else peak
+	if dc < 450.0:
+		var peak := (c.y - 3.0) * (1.0 - smoothstep(105.0, 300.0, dc)) + _nd.get_noise_2d(x, z) * 3.0
+		peak = (c.y - 3.0) if dc < 110.0 else peak
 		h = maxf(h, peak)
 	var dd := maxf(absf(x), absf(z))
 	h += maxf(0.0, dd - 700.0) * -0.15

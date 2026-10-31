@@ -10,7 +10,12 @@ var failures := 0
 
 func _ready() -> void:
 	var t0 := Time.get_ticks_msec()
-	world = load("res://scripts/world/world.gd").new()
+	var script: Script = load("res://scripts/world/world.gd")
+	if script == null or not script.can_instantiate():
+		print("WORLD CHECK: FAIL (world.gd failed to load)")
+		get_tree().quit(1)
+		return
+	world = script.new()
 	add_child(world)
 	var build_ms := Time.get_ticks_msec() - t0
 	_check(build_ms < 4000, "build time %d ms (< 4000)" % build_ms)
@@ -20,6 +25,7 @@ func _ready() -> void:
 	_check_collision()
 	_check_anchors()
 	_check_paths()
+	_check_waters()
 	_report_counts()
 	print("WORLD CHECK: %s (%d failures)" % ["PASS" if failures == 0 else "FAIL", failures])
 	get_tree().quit(1 if failures > 0 else 0)
@@ -106,6 +112,24 @@ func _check_paths() -> void:
 					worst_p = p
 				prev = h
 	_check(worst < 1.0, "paths: max step %.2f m per 1 m at %s" % [worst, worst_p])
+
+
+func _check_waters() -> void:
+	for w: Dictionary in WorldLayout.STILL_WATERS:
+		var c: Vector3 = w["pos"]
+		var info: Dictionary = world.terrain.get_still(w["id"])
+		var lvl: float = info.get("level", 0.0)
+		var g: float = world.height_at(c.x, c.z)
+		var depth := lvl - g
+		var wet: bool = world.is_in_water(Vector3(c.x, g + 0.05, c.z))
+		var ok: bool = (w["kind"] == &"marsh") or (wet and depth > 0.1 and depth < 0.8)
+		_check(ok, "still water %s: depth %.2f m, is_in_water=%s" % [w["id"], depth, wet])
+	var river_wet: bool = world.is_in_water(Vector3(42, world.height_at(42, -150) + 0.1, -150))
+	_check(river_wet, "river counts as water")
+	for key: StringName in WorldLayout.LANDMARKS:
+		_check(world.zones.zones.has(key), "landmark zone %s" % key)
+	var spring := world.find_child("SpringDrink", true, false)
+	_check(spring != null and spring.interact_id == &"spring_drink", "spring Interactable spring_drink present")
 
 
 func _report_counts() -> void:
