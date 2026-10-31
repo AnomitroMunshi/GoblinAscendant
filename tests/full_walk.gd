@@ -24,6 +24,8 @@ var _results: Array[String] = []
 
 
 func _ready() -> void:
+	# Autosaves fire while walking: keep the player's real save intact.
+	var backup := FileAccess.get_file_as_bytes(SaveManager.SAVE_PATH) if FileAccess.file_exists(SaveManager.SAVE_PATH) else PackedByteArray()
 	GameState.show_title = false
 	add_child(load("res://scenes/main.tscn").instantiate())
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://tests/screens/walk"))
@@ -62,6 +64,13 @@ func _ready() -> void:
 		await RenderingServer.frame_post_draw
 		get_viewport().get_texture().get_image().save_png("res://tests/screens/walk/%s.png" % area_name)
 	print("FULL WALK: done")
+	await _wait(1.0)  # let pending autosaves land before restoring
+	if backup.is_empty():
+		SaveManager.delete_save()
+	else:
+		var f := FileAccess.open(SaveManager.SAVE_PATH, FileAccess.WRITE)
+		f.store_buffer(backup)
+		f.close()
 	get_tree().quit()
 
 

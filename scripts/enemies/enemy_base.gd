@@ -133,7 +133,7 @@ func _ready() -> void:
 	if not _home_set:
 		home_position = global_position
 	collision_layer = Layers.ACTORS
-	collision_mask = Layers.WORLD | Layers.PLAYER | Layers.ACTORS
+	collision_mask = Layers.WORLD | Layers.TREES | Layers.PLAYER | Layers.ACTORS
 	floor_max_angle = deg_to_rad(50.0)
 	floor_snap_length = 0.6
 	floor_constant_speed = true
@@ -177,7 +177,7 @@ func _ready() -> void:
 	_build_attacks()
 
 	_ray_params = PhysicsRayQueryParameters3D.new()
-	_ray_params.collision_mask = Layers.WORLD
+	_ray_params.collision_mask = Layers.WORLD | Layers.TREES  # trunks block sight and steering
 	_ray_params.exclude = [get_rid()]
 
 	Events.lock_target_changed.connect(_on_lock_target_changed)

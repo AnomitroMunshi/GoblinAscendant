@@ -27,7 +27,7 @@ const POOL_2D := 8
 const MAX_DISTANCE := 40.0
 const MUSIC_FADE := 2.0
 const BUS_KEYS := {&"Music": &"music_volume", &"SFX": &"sfx_volume", &"Ambience": &"ambience_volume"}
-const AMBIENT_IDS := [&"bird_chirp", &"forest_ambience", &"river_loop", &"waterfall_loop", &"fire_loop"]
+const AMBIENT_IDS := [&"bird_chirp", &"forest_ambience", &"river_loop", &"waterfall_loop", &"fire_loop", &"marsh_loop"]
 const MUSIC_STREAMS := {&"explore": &"music_explore", &"title": &"music_explore", &"boss": &"music_boss"}
 
 var _streams: Dictionary = {}       # StringName -> Array[AudioStreamWAV]
@@ -74,6 +74,13 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	if _thread and _thread.is_started():
 		_thread.wait_to_finish()
+	# Stop and detach everything so the AudioServer drops its playbacks before
+	# the ObjectDB is torn down (otherwise streams/playbacks leak at exit).
+	for n in find_children("*", "", true, false):
+		if n is AudioStreamPlayer or n is AudioStreamPlayer3D:
+			n.stop()
+			n.stream = null
+	_streams.clear()
 
 
 # ================================================================ public API
@@ -249,7 +256,7 @@ func _generate_thread() -> void:
 	var ids: Array[StringName] = []
 	for k: StringName in AudioSynth.SFX:
 		ids.append(k)
-	ids.append_array([&"forest_ambience", &"music_explore", &"river_loop", &"waterfall_loop", &"fire_loop", &"music_boss"])
+	ids.append_array([&"forest_ambience", &"music_explore", &"river_loop", &"waterfall_loop", &"fire_loop", &"marsh_loop", &"music_boss"])
 	for id in ids:
 		var data := _generate_one(id)
 		_results_mutex.lock()

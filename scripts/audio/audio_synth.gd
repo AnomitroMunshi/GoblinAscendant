@@ -20,7 +20,7 @@ const SFX := {
 	&"bird_chirp": 4,
 }
 ## Seamless loops.
-const LOOPS := [&"forest_ambience", &"river_loop", &"waterfall_loop", &"fire_loop"]
+const LOOPS := [&"forest_ambience", &"river_loop", &"waterfall_loop", &"fire_loop", &"marsh_loop"]
 ## Seamless music loops.
 const MUSIC := [&"music_explore", &"music_boss"]
 
@@ -578,6 +578,23 @@ static func make_loop_sound(id: StringName) -> PackedFloat32Array:
 			mix(b, _crackles(5.0, 14.0, 232, false), 0.5)
 			mix(b, noise(5.0, 1800.0, 1800.0, 0.001, 1000.0, 600.0, 233, 0.12))
 			return make_loop(b, 0.4)
+		&"marsh_loop":
+			# still, murky air + slow mud bubbles + a few distant frog croaks
+			var seconds := 9.0
+			var b := noise(seconds + 0.8, 180.0, 180.0, 0.001, 1000.0, 25.0, 241, 0.7)
+			var rng := RandomNumberGenerator.new()
+			rng.seed = 242
+			for k in 14:
+				var f := rng.randf_range(90.0, 170.0)
+				mix_wrap(b, tone(0.09, f, f * 1.9, Wave.SINE, 0.004, 0.035, 1.0), rng.randf_range(0.25, 0.5),
+					rng.randi_range(0, b.size() - 1))
+			for k in 5:
+				var at := rng.randi_range(0, b.size() - 1)
+				var f := rng.randf_range(110.0, 150.0)
+				for r in rng.randi_range(2, 4):
+					mix_wrap(b, lowpass(tone(0.07, f, f * 0.85, Wave.SQUARE, 0.004, 0.03, 1.0), 900.0), 0.12,
+						at + int(r * 0.11 * SR))
+			return make_loop(b, 0.8)
 	return PackedFloat32Array()
 
 

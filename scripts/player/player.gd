@@ -152,7 +152,7 @@ func _init() -> void:
 func _ready() -> void:
 	add_to_group(&"player")
 	collision_layer = Layers.PLAYER
-	collision_mask = Layers.WORLD | Layers.ACTORS
+	collision_mask = Layers.WORLD | Layers.TREES | Layers.ACTORS
 	floor_max_angle = deg_to_rad(46.0)
 	floor_snap_length = 0.45
 	floor_constant_speed = true

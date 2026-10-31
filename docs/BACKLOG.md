@@ -25,7 +25,7 @@ Integration & QA runs after them; then the lead flips the default build to the f
 | World & environment (`scripts/world/`, `shaders/world/`) | ✅ | Realistic valley with CC0 textures, 7 tree species, all areas, still waters, spring, marsh, castle backdrop; world_check pass; lead-verified walk of 11 areas at 57–170 fps |
 | Combat & enemy AI (`scripts/enemies/`) | ✅ | All 7 types, 24 spawns, fair-combat rules; 93/93 headless tests; screenshots reviewed by agent. Awaiting choreography spec + live-play feel check |
 | UI & audio (`scripts/ui/`, `scripts/audio/`) | ✅ | HUD, compass, ability slots, boss/lock bars, toasts, pause/settings/controls/character/title; synthesized SFX/loops/music; 45/45 HUD checks + audio test; screenshots reviewed by agent and lead |
-| Integration & QA | ⬜ | After the paused agents resume |
+| Integration & QA | ✅ | Full Chapter 1 chain verified headless + windowed (`tests/qa_chapter1` 196/196, `tests/qa_title_flow` 11/11); report in `docs/QA_REPORT.md` |
 
 ## Backlog (next up, in order)
 1. ⬜ Hand-check player movement feel in the playground (speeds, jump, slopes, stairs, dodge, camera collision) and tune.
@@ -157,7 +157,8 @@ Revised Chapter 1 weapon path: rough knife → optional ordinary weapon finds �
 - Goblin is small on screen in the default camera view (~20% of screen height); consider a closer default distance.
 - Lock-on reticle spin is overridden by billboard mode (it still pulses).
 - Swing arc appears in full at the start of the active window instead of sweeping.
-- Quests: kill counters aren't saved; the first objective completes immediately on spawn.
+- Quests: the first objective completes immediately on spawn (design item, see QA_REPORT). Kill counters not being saved is correct (guards respawn on load).
+- Marsh runs at ~20 fps windowed on high (others 79–150); World-owned, see QA_REPORT.
 - Physics interpolation is ON project-wide: teleports must call `reset_physics_interpolation()`.
 
 ## Decisions log
@@ -171,6 +172,15 @@ Revised Chapter 1 weapon path: rough knife → optional ordinary weapon finds �
 
 ## Progress log
 ### 2026-10-31
+- Integration & QA pass (full game, `-- --full`). Report: `docs/QA_REPORT.md`.
+  - New `tests/qa_chapter1.tscn` drives the real chain to Hobgoblin evolution (196/196, headless and windowed); it was picked up by `tools/run_tests.sh`. It reached level 5 with real content, no XP top-up. New `tests/qa_title_flow.tscn` (windowed) covers title → New Game → save → title → Continue (11/11).
+  - Fixed: booting to the title screen autosaved the fresh background world over the real save (`save_manager.gd`); ObjectDB leaks at exit (Audio now stops its players on teardown, full game 0 leaks); added the `marsh_loop` ambience; `Palette.vertex_color_mat()` uses sRGB vertex colours; `full_walk` now backs up the real save.
+  - All suites green: player 79, combat 93, world 42, audio, progression 136, ui_hud, qa_chapter1 196.
+  - Open: marsh ~20 fps (World), the instant first objective (design), 2–4 audio leaks in the player-only build. Recommendation: make the full game the default after the World density pass lands and is re-verified.
+- User: the forest must be much denser ("most of the game will be inside the forest; not getting that feel"). The World agent is inverting the valley to forest-by-default, with small clearings only at story areas, trails under canopy, layered understory, dappled light and LOD for performance.
+  - Lead added physics layer `TREES` (8 / 128) for trunks, logs and stumps. Player, enemies, enemy sight/steering rays and sling stones collide with it; the camera doesn't, so dense trunks don't snap the camera. Player and combat suites stay green.
+- QA agent resumed after the usage-limit stop (it was tracing ObjectDB leaks to audio streams).
+- Lead: pushed to GitHub `origin/master` at user request (local `main` tracks `origin/master`), up to commit 524a5d3. The pushed default launch is still the player-only playground; the full game runs with `-- --full`. The QA pass and the default-launch switch are not in this push yet.
 - Lead: added `tools/run_tests.sh` (user: tests must be fast and parallel). All 6 headless suites run concurrently with save-file users serialized: player 79/79, combat 93/93, world 42/42, audio pass, progression 136/136, ui_hud 45/45, in 42 s wall time.
 - Lead: user cut the draft to "only the combat Chapter 1 needs".
   - Character Art stopped and deferred. Enemies keep their current working models; enemy files were unchanged since 336ef54 and combat is still 93/93. Its kit in `scripts/characters/` stays unused.

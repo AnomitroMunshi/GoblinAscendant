@@ -43,7 +43,7 @@ func _physics_process(delta: float) -> void:
 	velocity.y -= GRAVITY * delta
 	var from := global_position
 	var to := from + velocity * delta
-	var q := PhysicsRayQueryParameters3D.create(from, to, Layers.WORLD)
+	var q := PhysicsRayQueryParameters3D.create(from, to, Layers.WORLD | Layers.TREES)
 	var hit := get_world_3d().direct_space_state.intersect_ray(q)
 	if not hit.is_empty():
 		global_position = hit.position

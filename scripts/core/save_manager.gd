@@ -66,6 +66,10 @@ func request_autosave() -> void:
 	_autosave_pending = true
 	await get_tree().create_timer(0.5, true).timeout
 	_autosave_pending = false
+	# Behind the title screen a throwaway fresh world runs (Continue/New Game
+	# reload the scene); autosaving it would overwrite the player's real save.
+	if GameState.show_title:
+		return
 	if not GameState.is_player_dead() and not GameState.boss_active:
 		save_game()
 

@@ -90,6 +90,7 @@ Keep the public API in the stub files (`audio.gd`, `progression.gd`, `quest_mana
 ## Physics layers (`Layers`)
 `WORLD=1` terrain/rocks/trunks/ruins/cave (camera SpringArm collides with WORLD only) ·
 `PLAYER=2` · `ACTORS=4` enemies/NPCs/friend · `HITBOX=8` · `INTERACT=16` · `TRIGGER=32` · `WATER=64`.
+`TREES=128` holds trunks, fallen logs and stumps. Bodies, enemy sight/steering rays and sling stones collide with it; the camera does **not**, so dense forest never snaps the camera in front of the player.
 Decorative foliage (grass, flowers, bushes, leaves) has **no collision** and is not on any layer.
 Characters: player body layer `PLAYER`, mask `WORLD|ACTORS`. Actors layer `ACTORS`, mask `WORLD|PLAYER|ACTORS`.
 

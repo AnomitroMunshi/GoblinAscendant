@@ -61,6 +61,7 @@ static func vertex_color_mat(roughness: float = 0.9) -> StandardMaterial3D:
 		return _cache[key]
 	var m := StandardMaterial3D.new()
 	m.vertex_color_use_as_albedo = true
+	m.vertex_color_is_srgb = true  # vertex colours are authored as sRGB Palette colours
 	m.roughness = roughness
 	m.diffuse_mode = BaseMaterial3D.DIFFUSE_LAMBERT_WRAP
 	_cache[key] = m
